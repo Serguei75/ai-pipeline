@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube AI Pipeline — Admin Dashboard</title>
+  <style>
+    :root {
+      --bg-base: #0f172a;
+      --bg-elevated: #1e293b;
+      --bg-surface: #334155;
+      --text-primary: #f1f5f9;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-base); color: var(--text-primary); }
+    .layout { display: flex; min-height: 100vh; }
+
+    /* Sidebar */
+    .sidebar { width: 256px; background: var(--bg-elevated); padding: 24px; border-right: 1px solid var(--bg-surface); display: flex; flex-direction: column; gap: 4px; }
+    .logo { font-size: 18px; font-weight: 700; color: var(--accent); padding: 0 12px 24px; display: flex; align-items: center; gap: 8px; }
+    .nav-item { padding: 10px 14px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 14px; transition: all 0.15s; }
+    .nav-item:hover { background: var(--bg-surface); color: var(--text-primary); }
+    .nav-item.active { background: var(--accent); color: #0f172a; font-weight: 600; }
+    .nav-badge { margin-left: auto; background: var(--bg-surface); color: var(--text-muted); border-radius: 10px; padding: 2px 8px; font-size: 11px; }
+    .nav-item.active .nav-badge { background: rgba(0,0,0,0.2); color: #0f172a; }
+
+    /* Main */
+    .main { flex: 1; overflow-y: auto; }
+    .topbar { padding: 20px 32px; border-bottom: 1px solid var(--bg-surface); display: flex; align-items: center; justify-content: space-between; background: var(--bg-elevated); }
+    .topbar-title { font-size: 20px; font-weight: 600; }
+    .topbar-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .api-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
+    .dot.online { background: var(--success); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    .content { padding: 32px; }
+    .section { display: none; }
+    .section.active { display: block; }
+
+    /* Stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .stat-card { background: var(--bg-elevated); border: 1px solid var(--bg-surface); border-radius: 12px; padding: 20px; }
+    .stat-label { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+    .stat-value { font-size: 30px; font-weight: 700; margin-bottom: 6px; }
+    .stat-change { font-size: 13px; color: var(--success); }
+
+    /* Pipeline */
+    .pipeline { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 28px; }
+    .p-step { flex: 1; min-width: 160px; background: var(--bg-elevated); border: 1px solid var(--bg-surface); border-radius: 10px; padding: 16px; }
+    .p-step-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .p-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+    .p-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+    .p-bar { height: 4px; background: var(--bg-surface); border-radius: 2px; overflow: hidden; }
+    .p-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.5s; }
+
+    /* Table */
+    .card { background: var(--bg-elevated); border: 1px solid var(--bg-surface); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+    .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .card-title { font-size: 16px; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--bg-surface); }
+    td { padding: 12px; border-bottom: 1px solid var(--bg-surface); font-size: 14px; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--bg-surface); }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .badge-pending { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .badge-approved,.badge-completed { background: rgba(34,197,94,0.15); color: var(--success); }
+    .badge-processing { background: rgba(56,189,248,0.15); color: var(--accent); }
+    .badge-rejected { background: rgba(239,68,68,0.15); color: var(--error); }
+    .badge-tech { background: rgba(56,189,248,0.15); color: var(--accent); }
+    .badge-finance { background: rgba(34,197,94,0.15); color: var(--success); }
+    .badge-saas { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .badge-education { background: rgba(168,85,247,0.15); color: #a855f7; }
+
+    /* Buttons */
+    .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+    .btn-primary { background: var(--accent); color: #0f172a; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-secondary { background: var(--bg-surface); color: var(--text-primary); }
+    .btn-secondary:hover { background: #475569; }
+    .btn-success { background: rgba(34,197,94,0.15); color: var(--success); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: var(--error); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-group { display: flex; gap: 6px; }
+
+    /* Forms */
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+    .form-control { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--bg-surface); background: var(--bg-base); color: var(--text-primary); font-size: 14px; }
+    .form-control:focus { outline: none; border-color: var(--accent); }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .form-row { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--bg-elevated); border-radius: 12px; padding: 28px; width: 600px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .modal-title { font-size: 18px; font-weight: 600; }
+    .modal-close { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; }
+    .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--bg-surface); font-size: 14px; }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-key { color: var(--text-muted); }
+
+    /* Loading */
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(56,189,248,0.3); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* API banner */
+    .api-banner { background: var(--bg-elevated); border: 1px solid var(--bg-surface); border-left: 3px solid var(--accent); border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; display: flex; align-items: center; gap: 10px; }
+
+    @media (max-width: 768px) {
+      .layout { flex-direction: column; }
+      .sidebar { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span>🚀</span> AI Pipeline
+    </div>
+
+    <div class="nav-item active" data-section="dashboard">
+      <span>📊</span> Dashboard
+      <span class="nav-badge" id="badge-active">0</span>
+    </div>
+    <div class="nav-item" data-section="topics">
+      <span>📝</span> Топики
+      <span class="nav-badge" id="badge-topics">0</span>
+    </div>
+    <div class="nav-item" data-section="scripts">
+      <span>🎬</span> Скрипты
+    </div>
+    <div class="nav-item" data-section="media">
+      <span>🎥</span> Медиа
+    </div>
+    <div class="nav-item" data-section="localization">
+      <span>🌐</span> Локализация
+    </div>
+    <div class="nav-item" data-section="analytics">
+      <span>📈</span> Аналитика
+    </div>
+    <div class="nav-item" data-section="settings">
+      <span>⚙️</span> Настройки
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title" id="page-title">Dashboard</div>
+        <div class="topbar-sub">YouTube AI Content Pipeline</div>
+      </div>
+      <div class="api-status">
+        <span class="dot" id="api-dot"></span>
+        <span id="api-label">API: проверка...</span>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- DASHBOARD -->
+      <div class="section active" id="section-dashboard">
+        <div class="api-banner">
+          ℹ️ Backend API: <strong>http://localhost:3001</strong> &nbsp;|
+          Docs: <a href="https://github.com/Serguei75/ai-pipeline" target="_blank" style="color:var(--accent)">github.com/Serguei75/ai-pipeline</a>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Активные топики</div>
+            <div class="stat-value" id="stat-topics">...</div>
+            <div class="stat-change">↑ +12% за неделю</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Видео в обработке</div>
+            <div class="stat-value">8</div>
+            <div class="stat-change">↑ +3 за сегодня</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Опубликовано видео</div>
+            <div class="stat-value">156</div>
+            <div class="stat-change">↑ +18 за месяц</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Средний RPM</div>
+            <div class="stat-value">$8.50</div>
+            <div class="stat-change">↑ +15% за месяц</div>
+          </div>
+        </div>
+
+        <div class="pipeline">
+          <div class="p-step">
+            <div class="p-step-head"><span class="p-dot"></span> Topic Engine</div>
+            <div class="p-sub">15 топиков в очереди</div>
+            <div class="p-bar"><div class="p-fill" style="width:75%"></div></div>
+          </div>
+          <div class="p-step">
+            <div class="p-step-head"><span class="p-dot"></span> Script Engine</div>
+            <div class="p-sub">8 скриптов готовы</div>
+            <div class="p-bar"><div class="p-fill" style="width:60%"></div></div>
+          </div>
+          <div class="p-step">
+            <div class="p-step-head"><span class="p-dot"></span> Media Pipeline</div>
+            <div class="p-sub">5 видео в обработке</div>
+            <div class="p-bar"><div class="p-fill" style="width:45%"></div></div>
+          </div>
+          <div class="p-step">
+            <div class="p-step-head"><span class="p-dot"></span> Localization</div>
+            <div class="p-sub">12 языков активно</div>
+            <div class="p-bar"><div class="p-fill" style="width:90%"></div></div>
+          </div>
+          <div class="p-step">
+            <div class="p-step-head"><span class="p-dot"></span> Analytics</div>
+            <div class="p-sub">Мониторинг 24/7</div>
+            <div class="p-bar"><div class="p-fill" style="width:100%"></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">Последняя активность</div>
+            <button class="btn btn-secondary" onclick="loadDashboard()">&#8635; Обновить</button>
+          </div>
+          <table>
+            <thead><tr><th>Топик</th><th>Ниша</th><th>Статус</th><th>Рынки</th><th>Создан</th></tr></thead>
+            <tbody id="dashboard-activity"><tr><td colspan="5" style="text-align:center;color:var(--text-muted)"><span class="spinner"></span> Загрузка...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TOPICS -->
+      <div class="section" id="section-topics">
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">Топики &mdash; Topic Engine</div>
+            <div class="btn-group">
+              <button class="btn btn-secondary" onclick="toggleTopicForm()">+ Добавить</button>
+              <button class="btn btn-primary" onclick="generateTopics()">&#129302; AI Генерация</button>
+            </div>
+          </div>
+
+          <!-- Create form -->
+          <div id="topic-form" style="display:none; background:var(--bg-surface); padding:20px; border-radius:8px; margin-bottom:20px">
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label">Название</label>
+                <input class="form-control" id="f-title" placeholder="AI Revolution in Healthcare 2026">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Ниша</label>
+                <select class="form-control" id="f-niche">
+                  <option>TECH</option><option>FINANCE</option><option>SAAS</option>
+                  <option>EDUCATION</option><option>HEALTH</option><option>CRYPTO</option><option>MARKETING</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Рынки</label>
+                <input class="form-control" id="f-markets" placeholder="US, UK, DE">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Ключевые слова</label>
+                <input class="form-control" id="f-keywords" placeholder="AI, technology, 2026">
+              </div>
+            </div>
+            <div class="form-row">
+              <button class="btn btn-secondary" onclick="toggleTopicForm()">&#x2715; Отмена</button>
+              <button class="btn btn-primary" onclick="createTopic()">&#10003; Создать</button>
+            </div>
+          </div>
+
+          <!-- Filter bar -->
+          <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap">
+            <select class="form-control" style="width:auto" onchange="filterTopics('status', this.value)">
+              <option value="">Все статусы</option>
+              <option value="PENDING">Ожидает</option>
+              <option value="APPROVED">Одобрено</option>
+              <option value="REJECTED">Отклонено</option>
+            </select>
+            <select class="form-control" style="width:auto" onchange="filterTopics('niche', this.value)">
+              <option value="">Все ниши</option>
+              <option>TECH</option><option>FINANCE</option><option>SAAS</option>
+              <option>EDUCATION</option><option>HEALTH</option>
+            </select>
+            <input class="form-control" style="width:220px" placeholder="&#128269; Поиск..." oninput="filterTopics('search', this.value)">
+          </div>
+
+          <table>
+            <thead><tr><th>Топик</th><th>Ниша</th><th>Short</th><th>Deep</th><th>CPM</th><th>Статус</th><th>Действия</th></tr></thead>
+            <tbody id="topics-tbody"><tr><td colspan="7" style="text-align:center;color:var(--text-muted)"><span class="spinner"></span> Загрузка...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SCRIPTS -->
+      <div class="section" id="section-scripts">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Скрипты &mdash; Script Engine</div><span class="badge badge-processing">ℹ️ В разработке</span></div>
+          <p style="color:var(--text-muted);font-size:14px">Script Engine API будет добавлен в следующем модуле. Будет поддерживать генерацию Short (30-60s) и Deep (8-10min) скриптов через GPT-4 / Claude.</p>
+        </div>
+      </div>
+
+      <!-- MEDIA -->
+      <div class="section" id="section-media">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Медиа пайплайн &mdash; Media Pipeline</div><span class="badge badge-processing">ℹ️ В разработке</span></div>
+          <p style="color:var(--text-muted);font-size:14px">Media Pipeline будет обрабатывать скрипты: TTS (голос), аватары (HeyGen), B-roll и финальный монтаж через ffmpeg.</p>
+        </div>
+      </div>
+
+      <!-- LOCALIZATION -->
+      <div class="section" id="section-localization">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Локализация &mdash; Localization Engine</div><span class="badge badge-processing">ℹ️ В разработке</span></div>
+          <p style="color:var(--text-muted);font-size:14px">Поддержка YouTube multiaudio, перевод субтитров и адаптация контента для Tier-1 рынков (US, UK, DE, FR, CA, AU).</p>
+        </div>
+      </div>
+
+      <!-- ANALYTICS -->
+      <div class="section" id="section-analytics">
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Общий RPM</div><div class="stat-value">$8.50</div><div class="stat-change">↑ +15%</div></div>
+          <div class="stat-card"><div class="stat-label">CTR</div><div class="stat-value">4.2%</div><div class="stat-change">↑ +0.5%</div></div>
+          <div class="stat-card"><div class="stat-label">Watch Time</div><div class="stat-value">12.5K</div><div class="stat-change">↑ часов</div></div>
+          <div class="stat-card"><div class="stat-label">CTV Share</div><div class="stat-value">45%</div><div class="stat-change">↑ +8%</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Топ видео по RPM</div></div>
+          <table><thead><tr><th>Топик</th><th>Тип</th><th>Просмотры</th><th>RPM</th><th>CTR</th><th>Retention</th></tr></thead>
+          <tbody>
+            <tr><td>Financial Planning for Startups</td><td>Deep</td><td>15.2K</td><td>$18.50</td><td>5.1%</td><td>68%</td></tr>
+            <tr><td>AI in Healthcare</td><td>Deep</td><td>12.8K</td><td>$16.20</td><td>4.8%</td><td>65%</td></tr>
+            <tr><td>SaaS Marketing Tips</td><td>Short</td><td>8.5K</td><td>$14.80</td><td>6.2%</td><td>58%</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="section" id="section-settings">
+        <div class="card">
+          <div class="card-head"><div class="card-title">API Ключи</div></div>
+          <div class="form-grid">
+            <div class="form-group"><label class="form-label">OpenAI API Key</label><input type="password" class="form-control" placeholder="sk-..."></div>
+            <div class="form-group"><label class="form-label">YouTube Data API</label><input type="password" class="form-control" placeholder="AIza..."></div>
+            <div class="form-group"><label class="form-label">ElevenLabs TTS</label><input type="password" class="form-control" placeholder="el_..."></div>
+            <div class="form-group"><label class="form-label">HeyGen Avatar</label><input type="password" class="form-control" placeholder="hg_..."></div>
+            <div class="form-group"><label class="form-label">Anthropic Claude</label><input type="password" class="form-control" placeholder="sk-ant-..."></div>
+            <div class="form-group"><label class="form-label">Reddit Client ID</label><input type="password" class="form-control" placeholder="..."></div>
+          </div>
+          <div class="form-row"><button class="btn btn-primary">✓ Сохранить</button></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Система очередей</div></div>
+          <div class="form-grid">
+            <div class="form-group"><label class="form-label">Message Broker</label>
+              <select class="form-control"><option>RabbitMQ</option><option>Redis Streams</option><option>AWS SQS</option></select></div>
+            <div class="form-group"><label class="form-label">Max Workers</label><input type="number" class="form-control" value="5"></div>
+            <div class="form-group"><label class="form-label">Retry Attempts</label><input type="number" class="form-control" value="3"></div>
+            <div class="form-group"><label class="form-label">Backend API URL</label><input class="form-control" id="api-url" value="http://localhost:3001"></div>
+          </div>
+          <div class="form-row"><button class="btn btn-primary" onclick="saveSettings()">✓ Сохранить</button></div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /layout -->
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modal-title"></div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+  const API_BASE = localStorage.getItem('api_url') || 'http://localhost:3001';
+  let currentFilters = {};
+
+  // ---- Navigation ----
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', function() {
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      this.classList.add('active');
+      const key = this.dataset.section;
+      document.getElementById('section-' + key).classList.add('active');
+      document.getElementById('page-title').textContent = this.textContent.trim();
+      if (key === 'topics') loadTopics();
+      if (key === 'dashboard') loadDashboard();
+    });
+  });
+
+  // ---- API Health Check ----
+  async function checkApi() {
+    try {
+      const r = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(3000) });
+      const d = await r.json();
+      document.getElementById('api-dot').classList.add('online');
+      document.getElementById('api-label').textContent = `API: online (${d.service})`;
+      return true;
+    } catch {
+      document.getElementById('api-label').textContent = 'API: offline — запустите backend';
+      return false;
+    }
+  }
+
+  // ---- Dashboard ----
+  async function loadDashboard() {
+    try {
+      const r = await fetch(`${API_BASE}/api/topics?limit=5`);
+      const d = await r.json();
+      document.getElementById('stat-topics').textContent = d.pagination?.total || 0;
+      document.getElementById('badge-active').textContent = d.pagination?.total || 0;
+      document.getElementById('badge-topics').textContent = d.pagination?.total || 0;
+
+      const tbody = document.getElementById('dashboard-activity');
+      if (!d.topics?.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Нет данных — создайте первый топик</td></tr>';
+        return;
+      }
+      tbody.innerHTML = d.topics.map(t => `
+        <tr>
+          <td><strong>${t.title}</strong></td>
+          <td><span class="badge badge-${t.niche.toLowerCase()}">${t.niche}</span></td>
+          <td><span class="badge badge-${t.status.toLowerCase()}">${t.status}</span></td>
+          <td>${t.targetMarkets.join(', ')}</td>
+          <td>${new Date(t.createdAt).toLocaleDateString('ru')}</td>
+        </tr>
+      `).join('');
+    } catch {
+      document.getElementById('dashboard-activity').innerHTML =
+        '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">&#9888; Backend не запущен. Запустите: cd core/topic-engine && docker-compose up -d</td></tr>';
+    }
+  }
+
+  // ---- Topics ----
+  async function loadTopics() {
+    const params = new URLSearchParams();
+    Object.entries(currentFilters).forEach(([k, v]) => { if (v) params.append(k, v); });
+    try {
+      const r = await fetch(`${API_BASE}/api/topics?${params}`);
+      const d = await r.json();
+      renderTopics(d.topics || []);
+    } catch {
+      document.getElementById('topics-tbody').innerHTML =
+        '<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">&#9888; Backend не запущен</td></tr>';
+    }
+  }
+
+  function renderTopics(topics) {
+    const tbody = document.getElementById('topics-tbody');
+    if (!topics.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">Топики не найдены</td></tr>';
+      return;
+    }
+    tbody.innerHTML = topics.map(t => `
+      <tr>
+        <td><strong>${t.title}</strong><br><small style="color:var(--text-muted)">${t.source}</small></td>
+        <td><span class="badge badge-${t.niche.toLowerCase()}">${t.niche}</span></td>
+        <td>${t.forShort ? '&#10003;' : '&#8212;'}</td>
+        <td>${t.forDeep ? '&#10003;' : '&#8212;'}</td>
+        <td>${t.estimatedCPM ? '$' + t.estimatedCPM : '—'}</td>
+        <td><span class="badge badge-${t.status.toLowerCase()}">${t.status}</span></td>
+        <td>
+          <div class="btn-group">
+            ${t.status === 'PENDING' ? `<button class="btn btn-sm btn-success" onclick="approveTopic('${t.id}')">&#10003;</button>` : ''}
+            ${t.status === 'PENDING' ? `<button class="btn btn-sm btn-danger" onclick="rejectTopic('${t.id}')">&#10007;</button>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="viewTopic(${JSON.stringify(t).replace(/"/g, '&quot;')})">&#128065;</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function filterTopics(key, val) {
+    currentFilters[key] = val;
+    loadTopics();
+  }
+
+  function toggleTopicForm() {
+    const f = document.getElementById('topic-form');
+    f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  }
+
+  async function createTopic() {
+    const title = document.getElementById('f-title').value.trim();
+    const niche = document.getElementById('f-niche').value;
+    const markets = document.getElementById('f-markets').value.split(',').map(s => s.trim()).filter(Boolean);
+    const keywords = document.getElementById('f-keywords').value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!title) { alert('Введите название'); return; }
+    try {
+      await fetch(`${API_BASE}/api/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, niche, source: 'MANUAL', targetMarkets: markets.length ? markets : ['US'], keywords })
+      });
+      toggleTopicForm();
+      document.getElementById('f-title').value = '';
+      loadTopics();
+    } catch { alert('Ошибка: backend не запущен'); }
+  }
+
+  async function approveTopic(id) {
+    await fetch(`${API_BASE}/api/topics/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approvedBy: 'admin' }) });
+    loadTopics();
+  }
+
+  async function rejectTopic(id) {
+    if (!confirm('Отклонить топик?')) return;
+    await fetch(`${API_BASE}/api/topics/${id}/reject`, { method: 'POST' });
+    loadTopics();
+  }
+
+  async function generateTopics() {
+    const niche = prompt('Ниша для генерации:', 'TECH');
+    if (!niche) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/topics/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ niche: niche.toUpperCase(), targetMarkets: ['US', 'UK'], count: 3 })
+      });
+      const d = await r.json();
+      alert(`✅ Сгенерировано ${d.count} топиков!`);
+      loadTopics();
+    } catch { alert('Ошибка: backend не запущен'); }
+  }
+
+  function viewTopic(t) {
+    document.getElementById('modal-title').textContent = t.title;
+    document.getElementById('modal-body').innerHTML = `
+      <div class="detail-row"><span class="detail-key">ID</span><span>${t.id}</span></div>
+      <div class="detail-row"><span class="detail-key">Ниша</span><span class="badge badge-${t.niche.toLowerCase()}">${t.niche}</span></div>
+      <div class="detail-row"><span class="detail-key">Источник</span><span>${t.source}</span></div>
+      <div class="detail-row"><span class="detail-key">Рынки</span><span>${t.targetMarkets.join(', ')}</span></div>
+      <div class="detail-row"><span class="detail-key">Short</span><span>${t.forShort ? '✓' : '—'}</span></div>
+      <div class="detail-row"><span class="detail-key">Deep</span><span>${t.forDeep ? '✓' : '—'}</span></div>
+      <div class="detail-row"><span class="detail-key">Ключевые слова</span><span>${(t.keywords || []).join(', ') || '—'}</span></div>
+      <div class="detail-row"><span class="detail-key">Статус</span><span class="badge badge-${t.status.toLowerCase()}">${t.status}</span></div>
+      <div class="detail-row"><span class="detail-key">Создан</span><span>${new Date(t.createdAt).toLocaleString('ru')}</span></div>
+    `;
+    document.getElementById('modal').classList.add('open');
+  }
+
+  function closeModal() { document.getElementById('modal').classList.remove('open'); }
+  document.getElementById('modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+
+  function saveSettings() {
+    const url = document.getElementById('api-url').value;
+    localStorage.setItem('api_url', url);
+    alert('✅ Настройки сохранены');
+    location.reload();
+  }
+
+  // ---- Init ----
+  checkApi();
+  loadDashboard();
+</script>
+</body>
+</html>
