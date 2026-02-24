@@ -1,0 +1,20 @@
+{
+  "name": "ai-pipeline",
+  "version": "1.0.0",
+  "description": "AI-powered YouTube content generation pipeline",
+  "private": true,
+  "workspaces": [
+    "core/*",
+    "apps/*",
+    "shared/*"
+  ],
+  "scripts": {
+    "dev:topic-engine": "cd core/topic-engine && npm run dev",
+    "dev:admin": "cd apps/admin && npx serve . -p 3000",
+    "docker:up": "cd core/topic-engine && docker-compose up -d",
+    "docker:down": "cd core/topic-engine && docker-compose down"
+  },
+  "keywords": ["youtube", "ai", "content-generation", "automation"],
+  "author": "AI Pipeline Team",
+  "license": "MIT"
+}
