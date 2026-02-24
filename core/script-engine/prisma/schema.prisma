@@ -1,6 +1,5 @@
 // Script Engine — Database Schema
-// Two-channel strategy: FUEL (30–90 sec) + INTELLECTUAL (8–15 min)
-// Hook is a first-class citizen: the 0–8 sec decision window
+// Module 2: LLM-powered scripts for FUEL and INTELLECTUAL channels
 
 datasource db {
   provider = "postgresql"
@@ -11,18 +10,14 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// ============================
-// ENUMS
-// ============================
-
 enum ChannelType {
   FUEL
   INTELLECTUAL
 }
 
 enum ContentFormat {
-  SHORT_FUEL  // 30–90 sec
-  DEEP_ESSAY  // 8–15 min
+  SHORT_FUEL
+  DEEP_ESSAY
 }
 
 enum Niche {
@@ -36,12 +31,12 @@ enum Niche {
 }
 
 enum ScriptStatus {
-  GENERATING  // LLM is processing
-  DRAFT       // Generated, awaiting human review
-  REVIEW      // Sent to human reviewer
-  APPROVED    // Ready for Media Pipeline
-  REJECTED    // Needs regeneration
-  ARCHIVED    // No longer active
+  DRAFT
+  HOOK_REVIEW
+  SCRIPT_REVIEW
+  APPROVED
+  REJECTED
+  IN_PRODUCTION
 }
 
 enum HookEmotion {
@@ -52,48 +47,66 @@ enum HookEmotion {
   URGENCY
 }
 
-// ============================
-// MODELS
-// ============================
+enum BlockType {
+  HOOK
+  INTRO
+  BODY
+  EXAMPLE
+  OBJECTION
+  CTA
+}
+
+enum SpeakerRole {
+  HOST
+  GUEST
+  VOICE_OVER
+}
+
+enum VisualSlot {
+  AVATAR_STUDIO
+  AVATAR_CLOSEUP
+  SLIDE
+  GRAPH
+  BROLL
+  SCREEN_DEMO
+  TEXT_OVERLAY
+}
 
 model Script {
   id            String        @id @default(uuid())
-
-  // Reference to Topic Engine
   topicId       String
-  topicTitle    String
-
-  // Classification
   channelType   ChannelType
   contentFormat ContentFormat
   niche         Niche
+  title         String
   targetMarkets String[]
   languages     String[]      @default(["en"])
+  keywords      String[]
 
-  // Core content
-  hookText          String?
-  hookScore         Float?
-  script            String?     // full script text (approved)
-  scriptBlocks      Json?       // [{index, type, timecodeStart, timecodeEnd, text, speakerNote, visualNote, isHookWindow}]
+  hookVariants   HookVariant[]
+  approvedHook   String?
+  hookScore      Float?
+  hookEmotion    HookEmotion?
+  hookApprovedAt DateTime?
 
-  // Production metadata
-  estimatedDuration Int?        // seconds
-  wordCount         Int?
-  llmModel          String?     // gpt-4o, claude-3-5-sonnet etc.
-  promptVersion     String?     // prompt template version for reproducibility
+  blocks               ScriptBlock[]
+  fullScript           String?       @db.Text
+  wordCount            Int?
+  estimatedDurationSec Int?
 
-  // State machine
-  status        ScriptStatus  @default(GENERATING)
-  rejectionNote String?
+  status          ScriptStatus @default(DRAFT)
+  reviewNote      String?
+  approvedAt      DateTime?
+  approvedBy      String?
+  rejectedAt      DateTime?
+  rejectionReason String?
 
-  // Relations
-  hooks         Hook[]
-  revisions     ScriptRevision[]
+  llmModel      String?
+  llmTokensUsed Int?
+  llmCostUsd    Float?
 
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  approvedAt    DateTime?
-  approvedBy    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([channelType])
@@ -102,36 +115,38 @@ model Script {
   @@index([channelType, status])
 }
 
-model Hook {
+model HookVariant {
   id               String      @id @default(uuid())
   scriptId         String
   script           Script      @relation(fields: [scriptId], references: [id], onDelete: Cascade)
-
   text             String
-  score            Float?      // 0–100, blended LLM + emotion weight
-  emotionType      HookEmotion
-  visualSuggestion String?
-  approved         Boolean     @default(false)
-
+  score            Float
+  emotion          HookEmotion
+  visualSuggestion String
+  audioCue         String?
+  reasoning        String?
+  isApproved       Boolean     @default(false)
+  approvedAt       DateTime?
   createdAt        DateTime    @default(now())
 
   @@index([scriptId])
-  @@index([approved])
-  @@index([scriptId, score])
+  @@index([score])
 }
 
-model ScriptRevision {
-  id        String   @id @default(uuid())
-  scriptId  String
-  script    Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+model ScriptBlock {
+  id           String      @id @default(uuid())
+  scriptId     String
+  script       Script      @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  order        Int
+  type         BlockType
+  startTimeSec Int
+  endTimeSec   Int
+  content      String      @db.Text
+  speakerRole  SpeakerRole @default(VOICE_OVER)
+  visualSlot   VisualSlot?
+  visualNote   String?
+  audioCue     String?
+  notes        String?
 
-  version   Int
-  content   Json     // full scriptBlocks snapshot
-  changes   String?  // human-readable summary
-  createdBy String?  // "AI" | user_id
-
-  createdAt DateTime @default(now())
-
-  @@unique([scriptId, version])
-  @@index([scriptId])
+  @@index([scriptId, order])
 }
