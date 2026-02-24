@@ -11,55 +11,26 @@ export function formatNumber(n: number): string {
   return String(n)
 }
 
-export function formatCurrency(n: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n)
-}
-
-export function formatPercent(n: number | null | undefined): string {
+export function formatCurrency(n: number | null | undefined): string {
   if (n == null) return '—'
-  return `${n.toFixed(1)}%`
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n)
 }
 
-export function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
+export function formatDuration(sec: number | null | undefined): string {
+  if (sec == null) return '—'
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export function relativeTime(date: string | Date): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  const diff = Date.now() - d.getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
-}
-
-export function getStatusBadge(status: string): string {
-  const map: Record<string, string> = {
-    PENDING:           'bg-amber-100 text-amber-700',
-    APPROVED:          'bg-green-100 text-green-700',
-    REJECTED:          'bg-red-100 text-red-700',
-    DRAFT:             'bg-gray-100 text-gray-600',
-    PROCESSING:        'bg-blue-100 text-blue-700',
-    COMPLETED:         'bg-green-100 text-green-700',
-    FAILED:            'bg-red-100 text-red-700',
-    READY:             'bg-green-100 text-green-700',
-    RUNNING:           'bg-blue-100 text-blue-700',
-    AVATAR_GENERATING: 'bg-purple-100 text-purple-700',
-    BROLL_FETCHING:    'bg-indigo-100 text-indigo-700',
-    ASSEMBLY_READY:    'bg-teal-100 text-teal-700',
-  }
-  return map[status] ?? 'bg-gray-100 text-gray-600'
-}
-
-export function getRetentionColor(value: number | null): string {
-  if (value == null) return 'text-gray-400'
-  if (value >= 80) return 'text-green-600 font-semibold'
-  if (value >= 70) return 'text-amber-600 font-semibold'
-  return 'text-red-600 font-semibold'
+export function timeAgo(dateString: string): string {
+  const date = new Date(dateString)
+  const diff = Date.now() - date.getTime()
+  const min = Math.floor(diff / 60000)
+  const hr = Math.floor(diff / 3600000)
+  const day = Math.floor(diff / 86400000)
+  if (day > 0) return `${day}d ago`
+  if (hr > 0) return `${hr}h ago`
+  if (min > 0) return `${min}m ago`
+  return 'just now'
 }
