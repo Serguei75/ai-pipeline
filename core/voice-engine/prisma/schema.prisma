@@ -1,0 +1,138 @@
+// Voice Engine — Prisma Schema
+// TTS + voice cloning + multi-language audio
+// Supports YouTube Multi-Audio (one video → multiple language tracks)
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum ChannelType {
+  FUEL          // Fast TTS, energetic voice
+  INTELLECTUAL  // Brand voice clone, authoritative
+}
+
+enum ContentFormat {
+  SHORT_FUEL  // 30-90 sec
+  DEEP_ESSAY  // 8-15 min (requires text chunking)
+}
+
+enum VoiceJobStatus {
+  PENDING     // created, not started
+  PROCESSING  // currently generating audio
+  COMPLETED   // all audio files ready
+  FAILED      // error during generation
+}
+
+enum AudioFormat {
+  MP3   // default, YouTube-compatible
+  WAV   // lossless, for editing
+  OGG   // web-optimized
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+// Voice profiles define WHO speaks (voice ID + settings)
+// Research: INTELLECTUAL channel needs brand voice clone for higher retention
+model VoiceProfile {
+  id                 String      @id @default(uuid())
+  name               String      @unique
+  description        String?
+
+  // Channel targeting
+  channelType        ChannelType
+  language           String      // ISO 639-1: en, de, es, ja
+
+  // ElevenLabs voice
+  elevenLabsVoiceId  String      // e.g. TxGEqnHWrfWFTfGW9XjX
+  elevenLabsModel    String      @default("eleven_multilingual_v2")
+
+  // Voice settings (ElevenLabs voice_settings)
+  stability          Float       @default(0.65)  // 0.0-1.0
+  similarityBoost    Float       @default(0.75)  // 0.0-1.0
+  style              Float       @default(0.50)  // 0.0-1.0
+  speakerBoost       Boolean     @default(true)
+  speed              Float       @default(1.0)   // 0.7-1.3
+
+  isDefault          Boolean     @default(false)
+
+  voiceJobs          VoiceJob[]
+
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([channelType])
+  @@index([channelType, language])
+}
+
+// One job per script — generates audio in one or more languages
+model VoiceJob {
+  id              String          @id @default(uuid())
+  scriptId        String          @unique // FK to Script Engine
+
+  channelType     ChannelType
+  contentFormat   ContentFormat
+
+  voiceProfileId  String
+  voiceProfile    VoiceProfile    @relation(fields: [voiceProfileId], references: [id])
+
+  // Input script text (full, for chunking)
+  scriptText      String
+
+  // Target languages for localization
+  languages       String[]        @default(["en"])
+
+  // Generated audio files (one per language)
+  audioFiles      AudioFile[]
+
+  status          VoiceJobStatus  @default(PENDING)
+
+  // Stats
+  totalChunks     Int?            // number of TTS API calls made
+  totalTokensUsed Int?
+  errorMessage    String?
+
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([status])
+  @@index([channelType])
+}
+
+// One audio file per language per job
+model AudioFile {
+  id          String        @id @default(uuid())
+  jobId       String
+  job         VoiceJob      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  language    String        // ISO 639-1: en, de, es, ja
+  url         String        // local or S3 URL
+  format      AudioFormat   @default(MP3)
+
+  // Audio metadata
+  durationSec Float?        // estimated speech duration in seconds
+  sizeBytes   Int?
+  chunks      Int?          // how many TTS calls were needed
+
+  // YouTube Multi-Audio
+  isMain      Boolean       @default(false) // EN track is main
+  youtubeTrackLabel String? // e.g. "English (Original)", "German"
+
+  createdAt   DateTime      @default(now())
+
+  @@index([jobId])
+  @@index([jobId, language])
+  @@unique([jobId, language])
+}

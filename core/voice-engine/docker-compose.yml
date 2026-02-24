@@ -1,0 +1,44 @@
+version: '3.9'
+
+services:
+  voice-engine:
+    build: .
+    container_name: voice-engine
+    ports:
+      - '3003:3003'
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      BASE_URL: http://localhost:3003
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/voice_engine
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      ELEVENLABS_MODEL: eleven_multilingual_v2
+      UPLOAD_DIR: /app/uploads/audio
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+    volumes:
+      - voice_audio:/app/uploads/audio
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: voice-engine-db
+    ports:
+      - '5434:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: voice_engine
+    volumes:
+      - voice_engine_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  voice_engine_data:
+  voice_audio:
