@@ -1,43 +1,39 @@
 version: '3.9'
 
 services:
-  postgres:
-    image: postgres:16-alpine
+  script-engine:
+    build: .
+    container_name: script-engine
+    ports:
+      - '3002:3002'
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/script_engine
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: gpt-4o
+      TOPIC_ENGINE_URL: http://topic-engine:3001
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: script-engine-db
+    ports:
+      - '5433:5432'
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: script_engine
-    ports:
-      - '5434:5432'
     volumes:
-      - script_engine_postgres_data:/var/lib/postgresql/data
+      - script_engine_data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - '3002:3002'
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/script_engine?schema=public
-      PORT: '3002'
-      HOST: '0.0.0.0'
-      NODE_ENV: production
-      LOG_LEVEL: info
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
-      TOPIC_ENGINE_URL: ${TOPIC_ENGINE_URL:-http://topic-engine:3001}
-    env_file:
-      - .env
-
 volumes:
-  script_engine_postgres_data:
+  script_engine_data:
