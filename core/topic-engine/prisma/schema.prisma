@@ -1,0 +1,67 @@
+// Topic Engine — Database Schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum TopicSource {
+  YOUTUBE_TRENDS
+  GOOGLE_TRENDS
+  REDDIT_API
+  TWITTER_API
+  TELEGRAM_API
+  MANUAL
+}
+
+enum TopicStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+}
+
+enum Niche {
+  TECH
+  FINANCE
+  SAAS
+  EDUCATION
+  HEALTH
+  CRYPTO
+  MARKETING
+}
+
+model TopicCandidate {
+  id              String        @id @default(uuid())
+  title           String
+  description     String?
+  niche           Niche
+  source          TopicSource
+  status          TopicStatus   @default(PENDING)
+
+  targetMarkets   String[]
+
+  forShort        Boolean       @default(true)
+  forDeep         Boolean       @default(true)
+
+  trendingScore   Float?
+  estimatedCPM    Float?
+  keywords        String[]
+
+  sourceUrl       String?
+  sourceData      Json?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  approvedAt      DateTime?
+  approvedBy      String?
+
+  @@index([status])
+  @@index([niche])
+  @@index([source])
+}
