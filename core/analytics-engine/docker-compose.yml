@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  analytics-engine:
+    build: .
+    container_name: analytics-engine
+    ports:
+      - '3005:3005'
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/analytics_engine
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      YOUTUBE_OAUTH_TOKEN: ${YOUTUBE_OAUTH_TOKEN}
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: analytics-engine-db
+    ports:
+      - '5436:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: analytics_engine
+    volumes:
+      - analytics_engine_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  analytics_engine_data:

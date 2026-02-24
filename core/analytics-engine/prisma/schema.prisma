@@ -1,0 +1,177 @@
+// Analytics Engine — Prisma Schema
+// YouTube metrics + hook performance + niche CPM benchmarks + ROI
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum ChannelType {
+  FUEL
+  INTELLECTUAL
+}
+
+enum Niche {
+  FINANCE    // CPM $15-$50 TOP
+  SAAS       // CPM $10-$25
+  EDUCATION  // CPM $10-$25
+  HEALTH     // CPM $8-$15
+  TECH       // CPM $8-$12
+  MARKETING  // CPM $6-$10
+  CRYPTO     // CPM $5-$12
+}
+
+enum SyncType {
+  FULL_CHANNEL   // sync all videos for a channel
+  SINGLE_VIDEO   // sync one video
+  DAILY_SNAPSHOT // daily channel-level snapshot
+}
+
+enum SyncStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+// Per-video metrics — updated on every sync
+model VideoMetric {
+  id              String      @id @default(uuid())
+  scriptId        String      // FK to Script Engine
+  youtubeVideoId  String      @unique
+  channelId       String
+  channelType     ChannelType
+  niche           Niche
+
+  title           String
+  publishedAt     DateTime
+
+  // Basic stats (YouTube Data API v3 — API key only)
+  views           Int         @default(0)
+  likes           Int         @default(0)
+  comments        Int         @default(0)
+  shares          Int         @default(0)
+
+  // Monetization (YouTube Analytics API — requires OAuth2)
+  estimatedRevenue Float?     // USD
+  cpm             Float?      // cost per 1000 impressions
+  rpm             Float?      // revenue per 1000 impressions
+  adImpressions   Int?
+
+  // Engagement (Analytics API)
+  watchTimeHours  Float?      // total watch time in hours
+  avgViewDurationSec Float?   // average view duration
+  avgViewPercentage Float?    // 0-100 average retention %
+  subscribersGained Int?
+
+  // CTR (Analytics API)
+  impressions     Int?
+  clickThroughRate Float?     // 0-100 %
+
+  // Hook performance — KEY FEEDBACK LOOP
+  // Research: "watch/don't watch" decision in first 8 seconds
+  retentionAt8Sec  Float?    // % still watching at 8 sec
+  retentionAt30Sec Float?    // % still watching at 30 sec
+  retentionAt60Sec Float?    // % still watching at 60 sec (55% leave by 60 sec benchmark)
+
+  // CTV metrics (research: 45% of YT watch time on TV)
+  deviceTV        Float?      // % watched on connected TV
+  deviceMobile    Float?      // % watched on mobile
+  deviceDesktop   Float?      // % watched on desktop
+
+  // Geographic breakdown
+  topCountries    Json?       // [{ country: "US", views: 1200, revenue: 45.50 }]
+
+  // Link back to Script Engine hook data
+  hookEmotionType String?     // FEAR | CURIOSITY | SURPRISE | DESIRE | URGENCY
+  hookScore       Float?      // original LLM confidence score 0-100
+
+  lastSyncAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([channelType])
+  @@index([niche])
+  @@index([publishedAt])
+  @@index([channelType, niche])
+  @@index([hookEmotionType])
+}
+
+// Channel-level weekly snapshots for growth tracking
+model ChannelSnapshot {
+  id              String      @id @default(uuid())
+  channelId       String
+  channelType     ChannelType
+
+  subscriberCount Int
+  totalViews      Int
+  totalVideos     Int
+  totalRevenue    Float?
+
+  // Week-over-week deltas
+  newSubscribers  Int?
+  weeklyViews     Int?
+  weeklyRevenue   Float?
+  weeklyWatchHours Float?
+
+  snapshotDate    DateTime
+  createdAt       DateTime    @default(now())
+
+  @@index([channelId, snapshotDate])
+  @@index([channelType])
+}
+
+// CPM benchmarks per niche and market — seeded from research data
+// Used for revenue forecasting before videos are published
+model NicheBenchmark {
+  id          String    @id @default(uuid())
+  niche       Niche
+  market      String    // ISO 3166-1 alpha-2: US, AU, NO, CH, CA, DE
+
+  cpmMin      Float
+  cpmMax      Float
+  cpmAvg      Float
+
+  // Additional benchmarks
+  avgCtr      Float?    // average click-through rate for this niche
+  avgRetention Float?   // average view retention %
+
+  validFrom   DateTime  @default(now())
+  validTo     DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([niche, market])
+  @@index([niche])
+  @@index([market])
+}
+
+// Tracks all sync jobs (audit trail)
+model SyncJob {
+  id              String      @id @default(uuid())
+  channelId       String?
+  youtubeVideoId  String?
+  type            SyncType
+  status          SyncStatus  @default(PENDING)
+  videosProcessed Int         @default(0)
+  errorMessage    String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime    @default(now())
+
+  @@index([status])
+  @@index([type])
+}
