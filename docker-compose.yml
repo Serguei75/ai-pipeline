@@ -1,0 +1,233 @@
+# AI Pipeline — Full Stack Orchestration
+# 6 microservices · 5 PostgreSQL databases · Redis
+#
+# Start:  docker-compose up -d
+# Stop:   docker-compose down
+# Logs:   docker-compose logs -f <service>
+# Seed:   docker-compose exec topic-engine npm run prisma:seed
+
+version: '3.9'
+
+networks:
+  pipeline:
+    driver: bridge
+
+volumes:
+  topic_data:
+  script_data:
+  voice_data:
+  media_data:
+  analytics_data:
+  redis_data:
+
+# ── Reusable snippets ──────────────────────────────────────────────────
+x-service: &service
+  restart: unless-stopped
+  networks: [pipeline]
+
+x-pg-health: &pg-health
+  test: ['CMD-SHELL', 'pg_isready -U postgres']
+  interval: 5s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+
+x-svc-health: &svc-health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 15s
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════
+  # REDIS — shared cache
+  # ═══════════════════════════════════════════════════════════════════
+  redis:
+    <<: *service
+    image: redis:7-alpine
+    container_name: ai-pipeline-redis
+    ports: ['6379:6379']
+    volumes: [redis_data:/data]
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ═══════════════════════════════════════════════════════════════════
+  # DATABASES
+  # ═══════════════════════════════════════════════════════════════════
+  topic-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: topic-engine-db
+    ports: ['5432:5432']
+    environment: { POSTGRES_DB: topic_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [topic_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  script-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: script-engine-db
+    ports: ['5433:5432']
+    environment: { POSTGRES_DB: script_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [script_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  voice-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: voice-engine-db
+    ports: ['5434:5432']
+    environment: { POSTGRES_DB: voice_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [voice_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  media-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: media-engine-db
+    ports: ['5435:5432']
+    environment: { POSTGRES_DB: media_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [media_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  analytics-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: analytics-engine-db
+    ports: ['5436:5432']
+    environment: { POSTGRES_DB: analytics_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [analytics_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  # ═══════════════════════════════════════════════════════════════════
+  # MICROSERVICES
+  # ═══════════════════════════════════════════════════════════════════
+  topic-engine:
+    <<: *service
+    build: { context: ./core/topic-engine, dockerfile: Dockerfile }
+    container_name: topic-engine
+    ports: ['3001:3001']
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:postgres@topic-db:5432/topic_engine
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      LOG_LEVEL: info
+    depends_on:
+      topic-db: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
+
+  script-engine:
+    <<: *service
+    build: { context: ./core/script-engine, dockerfile: Dockerfile }
+    container_name: script-engine
+    ports: ['3002:3002']
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      DATABASE_URL: postgresql://postgres:postgres@script-db:5432/script_engine
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TOPIC_ENGINE_URL: http://topic-engine:3001
+      LOG_LEVEL: info
+    depends_on:
+      script-db: { condition: service_healthy }
+      topic-engine: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
+
+  voice-engine:
+    <<: *service
+    build: { context: ./core/voice-engine, dockerfile: Dockerfile }
+    container_name: voice-engine
+    ports: ['3003:3003']
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      DATABASE_URL: postgresql://postgres:postgres@voice-db:5432/voice_engine
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+      UPLOAD_DIR: /app/uploads/audio
+      BASE_URL: ${VOICE_ENGINE_PUBLIC_URL:-http://localhost:3003}
+      LOG_LEVEL: info
+    depends_on:
+      voice-db: { condition: service_healthy }
+      script-engine: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1']
+
+  media-engine:
+    <<: *service
+    build: { context: ./core/media-engine, dockerfile: Dockerfile }
+    container_name: media-engine
+    ports: ['3004:3004']
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      DATABASE_URL: postgresql://postgres:postgres@media-db:5432/media_engine
+      HEYGEN_API_KEY: ${HEYGEN_API_KEY}
+      PEXELS_API_KEY: ${PEXELS_API_KEY}
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+      VOICE_ENGINE_URL: http://voice-engine:3003
+      UPLOAD_DIR: /app/uploads/media
+      BASE_URL: ${MEDIA_ENGINE_PUBLIC_URL:-http://localhost:3004}
+      LOG_LEVEL: info
+    depends_on:
+      media-db: { condition: service_healthy }
+      voice-engine: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1']
+
+  analytics-engine:
+    <<: *service
+    build: { context: ./core/analytics-engine, dockerfile: Dockerfile }
+    container_name: analytics-engine
+    ports: ['3005:3005']
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      DATABASE_URL: postgresql://postgres:postgres@analytics-db:5432/analytics_engine
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      YOUTUBE_OAUTH_TOKEN: ${YOUTUBE_OAUTH_TOKEN:-}
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+      LOG_LEVEL: info
+    depends_on:
+      analytics-db: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1']
+
+  # ═══════════════════════════════════════════════════════════════════
+  # ADMIN UI — Next.js 14 (port 3000)
+  # ═══════════════════════════════════════════════════════════════════
+  admin-ui:
+    <<: *service
+    build: { context: ./apps/admin-ui, dockerfile: Dockerfile }
+    container_name: admin-ui
+    ports: ['3000:3000']
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_TOPIC_ENGINE_URL:     ${TOPIC_ENGINE_PUBLIC_URL:-http://localhost:3001}
+      NEXT_PUBLIC_SCRIPT_ENGINE_URL:    ${SCRIPT_ENGINE_PUBLIC_URL:-http://localhost:3002}
+      NEXT_PUBLIC_VOICE_ENGINE_URL:     ${VOICE_ENGINE_PUBLIC_URL:-http://localhost:3003}
+      NEXT_PUBLIC_MEDIA_ENGINE_URL:     ${MEDIA_ENGINE_PUBLIC_URL:-http://localhost:3004}
+      NEXT_PUBLIC_ANALYTICS_ENGINE_URL: ${ANALYTICS_ENGINE_PUBLIC_URL:-http://localhost:3005}
+    depends_on:
+      topic-engine:     { condition: service_healthy }
+      script-engine:    { condition: service_healthy }
+      voice-engine:     { condition: service_healthy }
+      media-engine:     { condition: service_healthy }
+      analytics-engine: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000 || exit 1']
