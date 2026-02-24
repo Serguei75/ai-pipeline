@@ -1,0 +1,137 @@
+// Script Engine — Database Schema
+// Two-channel strategy: FUEL (30–90 sec) + INTELLECTUAL (8–15 min)
+// Hook is a first-class citizen: the 0–8 sec decision window
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================
+// ENUMS
+// ============================
+
+enum ChannelType {
+  FUEL
+  INTELLECTUAL
+}
+
+enum ContentFormat {
+  SHORT_FUEL  // 30–90 sec
+  DEEP_ESSAY  // 8–15 min
+}
+
+enum Niche {
+  FINANCE
+  SAAS
+  EDUCATION
+  HEALTH
+  TECH
+  MARKETING
+  CRYPTO
+}
+
+enum ScriptStatus {
+  GENERATING  // LLM is processing
+  DRAFT       // Generated, awaiting human review
+  REVIEW      // Sent to human reviewer
+  APPROVED    // Ready for Media Pipeline
+  REJECTED    // Needs regeneration
+  ARCHIVED    // No longer active
+}
+
+enum HookEmotion {
+  CURIOSITY
+  FEAR
+  SURPRISE
+  DESIRE
+  URGENCY
+}
+
+// ============================
+// MODELS
+// ============================
+
+model Script {
+  id            String        @id @default(uuid())
+
+  // Reference to Topic Engine
+  topicId       String
+  topicTitle    String
+
+  // Classification
+  channelType   ChannelType
+  contentFormat ContentFormat
+  niche         Niche
+  targetMarkets String[]
+  languages     String[]      @default(["en"])
+
+  // Core content
+  hookText          String?
+  hookScore         Float?
+  script            String?     // full script text (approved)
+  scriptBlocks      Json?       // [{index, type, timecodeStart, timecodeEnd, text, speakerNote, visualNote, isHookWindow}]
+
+  // Production metadata
+  estimatedDuration Int?        // seconds
+  wordCount         Int?
+  llmModel          String?     // gpt-4o, claude-3-5-sonnet etc.
+  promptVersion     String?     // prompt template version for reproducibility
+
+  // State machine
+  status        ScriptStatus  @default(GENERATING)
+  rejectionNote String?
+
+  // Relations
+  hooks         Hook[]
+  revisions     ScriptRevision[]
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  approvedAt    DateTime?
+  approvedBy    String?
+
+  @@index([status])
+  @@index([channelType])
+  @@index([niche])
+  @@index([topicId])
+  @@index([channelType, status])
+}
+
+model Hook {
+  id               String      @id @default(uuid())
+  scriptId         String
+  script           Script      @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  text             String
+  score            Float?      // 0–100, blended LLM + emotion weight
+  emotionType      HookEmotion
+  visualSuggestion String?
+  approved         Boolean     @default(false)
+
+  createdAt        DateTime    @default(now())
+
+  @@index([scriptId])
+  @@index([approved])
+  @@index([scriptId, score])
+}
+
+model ScriptRevision {
+  id        String   @id @default(uuid())
+  scriptId  String
+  script    Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  version   Int
+  content   Json     // full scriptBlocks snapshot
+  changes   String?  // human-readable summary
+  createdBy String?  // "AI" | user_id
+
+  createdAt DateTime @default(now())
+
+  @@unique([scriptId, version])
+  @@index([scriptId])
+}
