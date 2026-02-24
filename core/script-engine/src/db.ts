@@ -1,42 +1,20 @@
 import { PrismaClient } from '@prisma/client'
-import { logger } from './logger'
+import { logger } from './logger.js'
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __prisma: PrismaClient | undefined
-}
+const db = new PrismaClient({
+  log: [
+    { emit: 'event', level: 'query' },
+    { emit: 'event', level: 'error' },
+    { emit: 'event', level: 'warn' },
+  ],
+})
 
-const createPrismaClient = (): PrismaClient => {
-  const client = new PrismaClient({
-    log: [
-      { emit: 'event', level: 'error' },
-      { emit: 'event', level: 'warn' },
-    ],
-  })
+db.$on('error', (e) => {
+  logger.error({ msg: e.message, target: e.target }, 'Prisma error')
+})
 
-  client.$on('error', (e) => {
-    logger.error({ err: e }, 'Prisma error')
-  })
+db.$on('warn', (e) => {
+  logger.warn({ msg: e.message, target: e.target }, 'Prisma warning')
+})
 
-  client.$on('warn', (e) => {
-    logger.warn({ warn: e }, 'Prisma warning')
-  })
-
-  return client
-}
-
-export const db: PrismaClient = global.__prisma ?? createPrismaClient()
-
-if (process.env['NODE_ENV'] !== 'production') {
-  global.__prisma = db
-}
-
-export const connectDb = async (): Promise<void> => {
-  await db.$connect()
-  logger.info('Database connected')
-}
-
-export const disconnectDb = async (): Promise<void> => {
-  await db.$disconnect()
-  logger.info('Database disconnected')
-}
+export { db }

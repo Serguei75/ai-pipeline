@@ -1,5 +1,5 @@
-// Script Engine — complete TypeScript types
-// Principle: no `any`, no stubs, all edge cases typed
+// Script Engine — TypeScript types
+// Mirrors Prisma schema, used for DTO validation & service contracts
 
 export enum ChannelType {
   FUEL         = 'FUEL',
@@ -7,30 +7,21 @@ export enum ChannelType {
 }
 
 export enum ContentFormat {
-  SHORT_FUEL = 'SHORT_FUEL',  // 30–90 sec
-  DEEP_ESSAY = 'DEEP_ESSAY',  // 8–15 min
-}
-
-export enum Niche {
-  FINANCE    = 'FINANCE',
-  SAAS       = 'SAAS',
-  EDUCATION  = 'EDUCATION',
-  HEALTH     = 'HEALTH',
-  TECH       = 'TECH',
-  MARKETING  = 'MARKETING',
-  CRYPTO     = 'CRYPTO',
+  SHORT_FUEL = 'SHORT_FUEL',  // 30-90 sec
+  DEEP_ESSAY = 'DEEP_ESSAY',  // 8-15 min
 }
 
 export enum ScriptStatus {
-  GENERATING = 'GENERATING',
-  DRAFT      = 'DRAFT',
-  REVIEW     = 'REVIEW',
-  APPROVED   = 'APPROVED',
-  REJECTED   = 'REJECTED',
-  ARCHIVED   = 'ARCHIVED',
+  PENDING          = 'PENDING',
+  HOOK_GENERATED   = 'HOOK_GENERATED',
+  HOOK_APPROVED    = 'HOOK_APPROVED',
+  SCRIPT_GENERATED = 'SCRIPT_GENERATED',
+  UNDER_REVIEW     = 'UNDER_REVIEW',
+  APPROVED         = 'APPROVED',
+  REJECTED         = 'REJECTED',
 }
 
-export enum HookEmotion {
+export enum EmotionType {
   CURIOSITY = 'CURIOSITY',
   FEAR      = 'FEAR',
   SURPRISE  = 'SURPRISE',
@@ -38,91 +29,69 @@ export enum HookEmotion {
   URGENCY   = 'URGENCY',
 }
 
-export enum ScriptBlockType {
-  HOOK     = 'HOOK',      // 0–8 sec — CRITICAL
-  OVERVIEW = 'OVERVIEW',  // 8–60 sec — second retention gate
-  BODY     = 'BODY',
-  EXAMPLE  = 'EXAMPLE',
-  CTA      = 'CTA',
-  AVATAR   = 'AVATAR',
-  SLIDE    = 'SLIDE',
-  BROLL    = 'BROLL',
+export enum Niche {
+  FINANCE   = 'FINANCE',
+  SAAS      = 'SAAS',
+  EDUCATION = 'EDUCATION',
+  HEALTH    = 'HEALTH',
+  TECH      = 'TECH',
+  MARKETING = 'MARKETING',
+  CRYPTO    = 'CRYPTO',
 }
 
-export interface ScriptBlock {
-  index: number
-  type: ScriptBlockType
-  timecodeStart: number       // seconds
-  timecodeEnd: number         // seconds
+// Segment inside a script — used for production plan export
+export interface ScriptSegment {
+  type: 'AVATAR' | 'SLIDE' | 'BROLL' | 'GRAPHIC' | 'SCREEN_DEMO'
+  startSec: number
+  endSec: number
   text: string
-  speakerNote?: string        // direction for avatar/speaker
-  visualNote?: string         // B-roll / slide suggestion
-  isHookWindow?: boolean      // true if 0–8 sec
+  notes?: string
+  avatarPlan?: 'STUDIO' | 'CLOSEUP' | 'DIALOGUE'
+  slideContent?: string
+  visualSuggestion?: string
 }
 
-export interface HookVariant {
-  text: string
-  emotionType: HookEmotion
-  visualSuggestion: string
-  score?: number
-}
-
-export interface HookGenerationResult {
-  hooks: HookVariant[]
-  topHook: HookVariant
-}
-
-export interface GeneratedScript {
-  script: string
-  scriptBlocks: ScriptBlock[]
-  estimatedDuration: number   // seconds
-  wordCount: number
-}
-
-// DTOs
-export interface CreateScriptDTO {
+// DTO: POST /api/scripts/generate
+export interface GenerateScriptDTO {
   topicId: string
   topicTitle: string
   channelType: ChannelType
   contentFormat: ContentFormat
   niche: Niche
   targetMarkets: string[]
+  keywords: string[]
+  description?: string
   languages?: string[]
-  context?: string
 }
 
+// DTO: POST /api/scripts/:id/approve-hook
+export interface ApproveHookDTO {
+  hookVariantId: string
+}
+
+// DTO: PATCH /api/scripts/:id
 export interface UpdateScriptDTO {
-  hookText?: string
-  script?: string
-  scriptBlocks?: ScriptBlock[]
-  status?: ScriptStatus
-  rejectionNote?: string
+  scriptFuel?: string
+  scriptDeep?: string
+  reviewNotes?: string
 }
 
+// DTO: POST /api/scripts/:id/reject
+export interface RejectScriptDTO {
+  reviewNotes: string
+  reviewedBy: string
+}
+
+// DTO: POST /api/scripts/:id/approve
 export interface ApproveScriptDTO {
   approvedBy: string
-  approvedHookId: string
 }
 
-export interface RegenerateScriptDTO {
-  feedback?: string
-  keepHook?: boolean
-}
-
+// Query filters for GET /api/scripts
 export interface ScriptFilters {
   status?: ScriptStatus
   channelType?: ChannelType
-  contentFormat?: ContentFormat
   niche?: Niche
-  topicId?: string
-  page?: number
-  perPage?: number
-}
-
-export interface PaginatedResponse<T> {
-  data: T[]
-  total: number
-  page: number
-  perPage: number
-  hasMore: boolean
+  limit?: number
+  offset?: number
 }

@@ -1,38 +1,35 @@
-import Fastify from 'fastify'
-import cors    from '@fastify/cors'
-import helmet from '@fastify/helmet'
-import { config }        from './config'
-import { logger }        from './logger'
-import { connectDb, disconnectDb } from './db'
-import { healthRoutes }  from './routes/health.routes'
-import { scriptsRoutes } from './routes/scripts.routes'
+import { buildServer } from './server.js'
+import { config } from './config.js'
+import { logger } from './logger.js'
+import { db } from './db.js'
 
-const app = Fastify({
-  loggerInstance:        logger,
-  disableRequestLogging: false,
-})
+async function main(): Promise<void> {
+  // Verify DB connection before starting
+  await db.$connect()
+  logger.info('Database connected')
 
-const start = async (): Promise<void> => {
-  await app.register(cors,   { origin: config.NODE_ENV !== 'production' })
-  await app.register(helmet)
-  await app.register(healthRoutes)
-  await app.register(scriptsRoutes)
-  await connectDb()
-  await app.listen({ port: config.PORT, host: '0.0.0.0' })
-  logger.info(`🚀 Script Engine running on port ${config.PORT}`)
+  const server = await buildServer()
+
+  await server.listen({
+    port: config.PORT,
+    host: '0.0.0.0',
+  })
+
+  logger.info({ port: config.PORT, env: config.NODE_ENV }, 'Script Engine is running')
+
+  // Graceful shutdown
+  const shutdown = async (signal: string): Promise<void> => {
+    logger.info({ signal }, 'Shutting down gracefully')
+    await server.close()
+    await db.$disconnect()
+    process.exit(0)
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGINT', () => shutdown('SIGINT'))
 }
 
-const shutdown = async (): Promise<void> => {
-  logger.info('Shutting down gracefully...')
-  await app.close()
-  await disconnectDb()
-  process.exit(0)
-}
-
-process.on('SIGINT',  () => { void shutdown() })
-process.on('SIGTERM', () => { void shutdown() })
-
-void start().catch((err) => {
-  logger.error({ err }, 'Fatal: failed to start Script Engine')
+main().catch((err: unknown) => {
+  logger.error(err, 'Fatal startup error')
   process.exit(1)
 })
