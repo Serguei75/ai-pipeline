@@ -1,0 +1,185 @@
+// Media Engine — Prisma Schema
+// HeyGen avatar clips + Pexels B-roll + Assembly Plan
+// Research: Avatar-based content = higher trust + CTV retention
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum ChannelType {
+  FUEL
+  INTELLECTUAL
+}
+
+enum ContentFormat {
+  SHORT_FUEL
+  DEEP_ESSAY
+}
+
+enum MediaJobStatus {
+  PENDING            // job created, no processing started
+  AVATAR_GENERATING  // HeyGen clips being generated
+  BROLL_FETCHING     // Pexels B-roll being fetched
+  ASSEMBLY_READY     // assembly plan generated, ready for editing
+  COMPLETED          // all assets ready
+  FAILED
+}
+
+enum ClipStatus {
+  PENDING
+  PROCESSING  // HeyGen is rendering
+  READY       // download URL available
+  FAILED
+}
+
+enum BrollProvider {
+  PEXELS
+  PIXABAY
+}
+
+enum SegmentType {
+  AVATAR       // talking head (HeyGen)
+  SLIDE        // text/graphic slide
+  BROLL        // stock footage overlay
+  GRAPHIC      // animated graphic / lower third
+  SCREEN_DEMO  // screen recording
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+// Avatar profiles — define which HeyGen avatar to use
+model AvatarProfile {
+  id              String      @id @default(uuid())
+  name            String      @unique
+  description     String?
+  channelType     ChannelType
+  language        String      // ISO 639-1
+
+  heygenAvatarId  String      // HeyGen avatar_id
+  heygenAvatarStyle String    @default("normal")  // normal | circle | closeup
+  backgroundType  String      @default("color")   // color | image | transparent
+  backgroundColor String      @default("#0A0A0A") // dark bg for CTV
+
+  isDefault       Boolean     @default(false)
+
+  mediaJobs       MediaJob[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([channelType])
+}
+
+// One media job per script
+model MediaJob {
+  id              String          @id @default(uuid())
+  scriptId        String          @unique
+  voiceJobId      String?         // link to Voice Engine job
+
+  channelType     ChannelType
+  contentFormat   ContentFormat
+
+  avatarProfileId String?
+  avatarProfile   AvatarProfile?  @relation(fields: [avatarProfileId], references: [id])
+
+  // Script segments from Script Engine (JSON array of ScriptSegment)
+  segments        Json
+
+  // Generated assets
+  avatarClips     AvatarClip[]
+  brollAssets     BrollAsset[]
+
+  // Final assembly plan (VideoAssemblyPlan JSON)
+  assemblyPlan    Json?
+
+  status          MediaJobStatus  @default(PENDING)
+  errorMessage    String?
+
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([status])
+  @@index([channelType])
+}
+
+// One HeyGen avatar clip per AVATAR segment
+model AvatarClip {
+  id              String      @id @default(uuid())
+  jobId           String
+  job             MediaJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  segmentIndex    Int         // index in segments[]
+  segmentType     SegmentType @default(AVATAR)
+
+  // HeyGen video job
+  heygenVideoId   String?     // returned by HeyGen create endpoint
+  videoUrl        String?     // final download URL
+  thumbnailUrl    String?     // preview thumbnail
+
+  // Timeline placement
+  startSec        Float
+  endSec          Float
+
+  // Script content for this segment
+  text            String
+  notes           String?
+  avatarPlan      String?     // STUDIO | CLOSEUP | DIALOGUE
+
+  // Audio reference from Voice Engine
+  audioUrl        String?     // voice engine audio file URL
+
+  status          ClipStatus  @default(PENDING)
+  errorMessage    String?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([jobId])
+  @@index([jobId, status])
+}
+
+// B-roll footage from Pexels / Pixabay
+model BrollAsset {
+  id              String        @id @default(uuid())
+  jobId           String
+  job             MediaJob      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  segmentIndex    Int
+  searchQuery     String        // what was searched
+  provider        BrollProvider
+  externalId      String        // provider's ID
+
+  // Asset URLs
+  videoUrl        String        // HD download URL
+  previewUrl      String?       // thumbnail
+
+  // Video metadata
+  width           Int?
+  height          Int?
+  durationSec     Float?
+  photographer    String?
+
+  // Timeline placement
+  startSec        Float
+  endSec          Float
+
+  // Visual context from script
+  visualSuggestion String?
+
+  createdAt       DateTime      @default(now())
+
+  @@index([jobId])
+}

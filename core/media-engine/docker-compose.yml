@@ -1,0 +1,45 @@
+version: '3.9'
+
+services:
+  media-engine:
+    build: .
+    container_name: media-engine
+    ports:
+      - '3004:3004'
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      BASE_URL: http://localhost:3004
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/media_engine
+      HEYGEN_API_KEY: ${HEYGEN_API_KEY}
+      PEXELS_API_KEY: ${PEXELS_API_KEY}
+      UPLOAD_DIR: /app/uploads/media
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+      VOICE_ENGINE_URL: http://voice-engine:3003
+    volumes:
+      - media_files:/app/uploads/media
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: media-engine-db
+    ports:
+      - '5435:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: media_engine
+    volumes:
+      - media_engine_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  media_engine_data:
+  media_files:
