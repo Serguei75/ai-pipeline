@@ -1,0 +1,29 @@
+{
+  "name": "@ai-pipeline/topic-engine",
+  "version": "1.0.0",
+  "description": "Topic Engine — AI-powered YouTube content topic generation",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@prisma/client": "^5.9.1",
+    "fastify": "^4.26.0",
+    "pino-pretty": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "prisma": "^5.9.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "keywords": ["youtube", "ai", "topic-engine"],
+  "license": "MIT"
+}
