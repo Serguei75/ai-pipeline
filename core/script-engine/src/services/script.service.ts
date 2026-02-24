@@ -1,302 +1,274 @@
-import { v4 as uuidv4 } from 'uuid'
-import type { Prisma } from '@prisma/client'
-import { db } from '../db'
-import { logger } from '../logger'
-import { llmService } from './llm.service'
-import { hookService } from './hook.service'
-import { buildFuelPrompt } from '../prompts/fuel.prompt'
-import { buildDeepPrompt } from '../prompts/deep.prompt'
-import { VERSION as FUEL_VERSION } from '../prompts/fuel.prompt'
-import { VERSION as DEEP_VERSION } from '../prompts/deep.prompt'
+import type { PrismaClient } from '@prisma/client'
+import type { OpenAIService } from './openai.service.js'
+import type { HookService } from './hook.service.js'
+import { buildFuelUserPrompt, FUEL_SYSTEM_PROMPT } from '../prompts/fuel.prompt.js'
+import { buildDeepUserPrompt, DEEP_SYSTEM_PROMPT } from '../prompts/deep.prompt.js'
 import {
-  NotFoundError,
-  ValidationError,
-  InvalidStatusTransitionError,
-} from '../errors/app.errors'
-import {
-  ChannelType,
   ContentFormat,
   ScriptStatus,
-  type CreateScriptDTO,
-  type UpdateScriptDTO,
+  type ApproveHookDTO,
   type ApproveScriptDTO,
-  type RegenerateScriptDTO,
+  type GenerateScriptDTO,
+  type RejectScriptDTO,
   type ScriptFilters,
-  type GeneratedScript,
-} from '../types'
+  type UpdateScriptDTO,
+} from '../types.js'
+import { logger } from '../logger.js'
 
-// State machine: defines which transitions are valid
-const VALID_TRANSITIONS: Record<ScriptStatus, ScriptStatus[]> = {
-  [ScriptStatus.GENERATING]: [ScriptStatus.DRAFT, ScriptStatus.REJECTED],
-  [ScriptStatus.DRAFT]:      [ScriptStatus.REVIEW, ScriptStatus.ARCHIVED],
-  [ScriptStatus.REVIEW]:     [ScriptStatus.APPROVED, ScriptStatus.REJECTED],
-  [ScriptStatus.APPROVED]:   [ScriptStatus.ARCHIVED],
-  [ScriptStatus.REJECTED]:   [ScriptStatus.GENERATING],
-  [ScriptStatus.ARCHIVED]:   [],
-}
+export class ScriptService {
+  constructor(
+    private readonly db: PrismaClient,
+    private readonly openai: OpenAIService,
+    private readonly hookService: HookService,
+  ) {}
 
-const assertValidTransition = (from: ScriptStatus, to: ScriptStatus): void => {
-  const allowed = VALID_TRANSITIONS[from] ?? []
-  if (!allowed.includes(to)) {
-    throw new InvalidStatusTransitionError(from, to)
-  }
-}
+  // ─── Generate: create record + generate 5 hook variants ─────────────────────
 
-const countWords = (text: string): number =>
-  text.trim().split(/\s+/).filter(Boolean).length
+  async generate(dto: GenerateScriptDTO) {
+    const existing = await this.db.script.findUnique({ where: { topicId: dto.topicId } })
+    if (existing) {
+      throw new Error(`Script for topic ${dto.topicId} already exists (id: ${existing.id})`)
+    }
 
-const buildPrompt = (dto: { topicTitle: string; hookText: string; niche: string; targetMarkets: string[]; context?: string }, format: ContentFormat): string =>
-  format === ContentFormat.SHORT_FUEL
-    ? buildFuelPrompt({ topicTitle: dto.topicTitle, hookText: dto.hookText, niche: dto.niche as import('../types').Niche, targetMarkets: dto.targetMarkets, keywords: [], context: dto.context })
-    : buildDeepPrompt({ topicTitle: dto.topicTitle, hookText: dto.hookText, niche: dto.niche as import('../types').Niche, targetMarkets: dto.targetMarkets, keywords: [], context: dto.context })
-
-export const scriptService = {
-  async create(dto: CreateScriptDTO): Promise<{ id: string }> {
-    const requestId = uuidv4()
-    const log = logger.child({ requestId, service: 'script' })
-    log.info({ topicId: dto.topicId, channelType: dto.channelType, contentFormat: dto.contentFormat }, 'Creating script')
-
-    // Step 1: Create record in GENERATING state
-    const script = await db.script.create({
+    const script = await this.db.script.create({
       data: {
-        topicId:       dto.topicId,
-        topicTitle:    dto.topicTitle,
-        channelType:   dto.channelType,
+        topicId: dto.topicId,
+        topicTitle: dto.topicTitle,
+        channelType: dto.channelType,
         contentFormat: dto.contentFormat,
-        niche:         dto.niche,
+        niche: dto.niche,
         targetMarkets: dto.targetMarkets,
-        languages:     dto.languages ?? ['en'],
-        status:        ScriptStatus.GENERATING,
+        keywords: dto.keywords ?? [],
+        languages: dto.languages ?? ['en'],
+        description: dto.description,
+        status: ScriptStatus.PENDING,
       },
     })
 
-    try {
-      // Step 2: Generate 5 hook variants
-      const hookResult = await hookService.generateForScript({
-        scriptId:      script.id,
-        topicTitle:    dto.topicTitle,
-        niche:         dto.niche,
-        channelType:   dto.channelType,
-        contentFormat: dto.contentFormat,
-        targetMarkets: dto.targetMarkets,
-        count:         5,
-      })
+    logger.info({ scriptId: script.id, topicId: dto.topicId }, 'Script created, starting hook generation')
 
-      // Step 3: Auto-approve the top-scoring hook for the initial draft
-      const topHookDb = await db.hook.findFirst({
-        where:   { scriptId: script.id },
-        orderBy: { score: 'desc' },
-      })
-      if (topHookDb) await hookService.approveHook(topHookDb.id)
+    // Generate 5 hook variants (0-8 sec — critical decision window)
+    await this.hookService.generateHooks({
+      scriptId: script.id,
+      topicTitle: dto.topicTitle,
+      niche: dto.niche,
+      targetMarkets: dto.targetMarkets,
+      keywords: dto.keywords ?? [],
+      contentFormat: dto.contentFormat,
+    })
 
-      // Step 4: Generate full script using the top hook
-      const promptVersion = dto.contentFormat === ContentFormat.SHORT_FUEL ? FUEL_VERSION : DEEP_VERSION
-      const maxTokens     = dto.contentFormat === ContentFormat.SHORT_FUEL ? 1500 : 6000
+    // Update status to HOOK_GENERATED — awaits human selection
+    await this.db.script.update({
+      where: { id: script.id },
+      data: { status: ScriptStatus.HOOK_GENERATED, generatedAt: new Date() },
+    })
 
-      const { parsed, meta } = await llmService.generateJson<GeneratedScript>({
-        prompt:      buildPrompt({ topicTitle: dto.topicTitle, hookText: hookResult.topHook.text, niche: dto.niche, targetMarkets: dto.targetMarkets, context: dto.context }, dto.contentFormat),
-        maxTokens,
-        temperature: 0.65,
-        requestId,
-      })
+    return this.findById(script.id)
+  }
 
-      const wordCount = countWords(parsed.script)
+  // ─── Approve hook: triggers full script generation ───────────────────────────
 
-      // Step 5: Save script + revision v1 atomically
-      await db.$transaction([
-        db.script.update({
-          where: { id: script.id },
-          data: {
-            hookText:          hookResult.topHook.text,
-            hookScore:         hookResult.topHook.score,
-            script:            parsed.script,
-            scriptBlocks:      parsed.scriptBlocks as unknown as Prisma.InputJsonValue,
-            estimatedDuration: parsed.estimatedDuration,
-            wordCount,
-            llmModel:          meta.model,
-            promptVersion,
-            status:            ScriptStatus.DRAFT,
-          },
-        }),
-        db.scriptRevision.create({
-          data: {
-            scriptId:  script.id,
-            version:   1,
-            content:   parsed.scriptBlocks as unknown as Prisma.InputJsonValue,
-            changes:   'Initial generation',
-            createdBy: 'AI',
-          },
-        }),
-      ])
+  async approveHook(scriptId: string, dto: ApproveHookDTO) {
+    const script = await this.db.script.findUniqueOrThrow({ where: { id: scriptId } })
 
-      log.info({ scriptId: script.id, wordCount, model: meta.model }, 'Script created successfully')
-    } catch (error) {
-      await db.script.update({
-        where: { id: script.id },
-        data: {
-          status:        ScriptStatus.REJECTED,
-          rejectionNote: `Generation error: ${error instanceof Error ? error.message : 'Unknown'}`,
-        },
-      })
-      log.error({ scriptId: script.id, error }, 'Script generation failed')
-      throw error
+    if (script.status !== ScriptStatus.HOOK_GENERATED) {
+      throw new Error(`Cannot approve hook: script is in status "${script.status}", expected HOOK_GENERATED`)
     }
 
-    return { id: script.id }
-  },
+    const hook = await this.db.hookVariant.findUniqueOrThrow({ where: { id: dto.hookVariantId } })
+
+    if (hook.scriptId !== scriptId) {
+      throw new Error(`Hook ${dto.hookVariantId} does not belong to script ${scriptId}`)
+    }
+
+    // Atomic: clear all approvals, approve selected, update script status
+    await this.db.$transaction([
+      this.db.hookVariant.updateMany({
+        where: { scriptId },
+        data: { approved: false },
+      }),
+      this.db.hookVariant.update({
+        where: { id: dto.hookVariantId },
+        data: { approved: true },
+      }),
+      this.db.script.update({
+        where: { id: scriptId },
+        data: {
+          approvedHookId: dto.hookVariantId,
+          status: ScriptStatus.HOOK_APPROVED,
+        },
+      }),
+    ])
+
+    logger.info({ scriptId, hookVariantId: dto.hookVariantId }, 'Hook approved, generating full script')
+
+    return this.generateFullScript(scriptId)
+  }
+
+  // ─── Generate full script (internal, called after hook approval) ─────────────
+
+  private async generateFullScript(scriptId: string) {
+    const script = await this.db.script.findUniqueOrThrow({
+      where: { id: scriptId },
+      include: { hookVariants: { where: { approved: true } } },
+    })
+
+    const approvedHook = script.hookVariants[0]
+    if (!approvedHook) {
+      throw new Error(`No approved hook found for script ${scriptId}`)
+    }
+
+    const baseParams = {
+      topicTitle: script.topicTitle,
+      approvedHook: approvedHook.hookText,
+      niche: script.niche,
+      keywords: script.keywords,
+      targetMarkets: script.targetMarkets,
+      description: script.description ?? undefined,
+      languages: script.languages,
+    }
+
+    if (script.contentFormat === ContentFormat.SHORT_FUEL) {
+      const { content, tokensUsed, model } = await this.openai.complete(
+        FUEL_SYSTEM_PROMPT,
+        buildFuelUserPrompt(baseParams),
+      )
+
+      let parsed: {
+        script: string
+        segments: unknown[]
+        estimatedDuration: number
+        thumbnailIdeas: string[]
+        titleVariants: string[]
+      }
+      try {
+        parsed = JSON.parse(content)
+      } catch {
+        throw new Error('OpenAI returned invalid JSON for FUEL script')
+      }
+
+      return this.db.script.update({
+        where: { id: scriptId },
+        data: {
+          scriptFuel: parsed.script,
+          segments: parsed.segments as any,
+          thumbnailIdeas: parsed.thumbnailIdeas ?? [],
+          titleVariants: parsed.titleVariants ?? [],
+          llmTokensUsed: tokensUsed,
+          llmModel: model,
+          status: ScriptStatus.SCRIPT_GENERATED,
+          generatedAt: new Date(),
+        },
+        include: { hookVariants: true },
+      })
+    }
+
+    // DEEP_ESSAY
+    const { content, tokensUsed, model } = await this.openai.complete(
+      DEEP_SYSTEM_PROMPT,
+      buildDeepUserPrompt(baseParams),
+    )
+
+    let parsed: {
+      script: string
+      segments: unknown[]
+      commentBait: string[]
+      thumbnailIdeas: string[]
+      titleVariants: string[]
+      estimatedDuration: number
+      localizationNotes?: string
+    }
+    try {
+      parsed = JSON.parse(content)
+    } catch {
+      throw new Error('OpenAI returned invalid JSON for DEEP_ESSAY script')
+    }
+
+    return this.db.script.update({
+      where: { id: scriptId },
+      data: {
+        scriptDeep: parsed.script,
+        segments: parsed.segments as any,
+        commentBait: parsed.commentBait ?? [],
+        thumbnailIdeas: parsed.thumbnailIdeas ?? [],
+        titleVariants: parsed.titleVariants ?? [],
+        localizationNotes: parsed.localizationNotes,
+        llmTokensUsed: tokensUsed,
+        llmModel: model,
+        status: ScriptStatus.SCRIPT_GENERATED,
+        generatedAt: new Date(),
+      },
+      include: { hookVariants: true },
+    })
+  }
+
+  // ─── Status transitions ───────────────────────────────────────────────────────
+
+  async submitForReview(scriptId: string) {
+    const script = await this.db.script.findUniqueOrThrow({ where: { id: scriptId } })
+    if (script.status !== ScriptStatus.SCRIPT_GENERATED) {
+      throw new Error(`Cannot submit for review: expected SCRIPT_GENERATED, got "${script.status}"`)
+    }
+    return this.db.script.update({
+      where: { id: scriptId },
+      data: { status: ScriptStatus.UNDER_REVIEW },
+    })
+  }
+
+  async approve(scriptId: string, dto: ApproveScriptDTO) {
+    return this.db.script.update({
+      where: { id: scriptId },
+      data: {
+        status: ScriptStatus.APPROVED,
+        approvedBy: dto.approvedBy,
+        approvedAt: new Date(),
+      },
+    })
+  }
+
+  async reject(scriptId: string, dto: RejectScriptDTO) {
+    return this.db.script.update({
+      where: { id: scriptId },
+      data: {
+        status: ScriptStatus.REJECTED,
+        reviewNotes: dto.reviewNotes,
+        reviewedBy: dto.reviewedBy,
+        reviewedAt: new Date(),
+      },
+    })
+  }
+
+  // ─── CRUD ────────────────────────────────────────────────────────────────────
+
+  async update(scriptId: string, dto: UpdateScriptDTO) {
+    return this.db.script.update({
+      where: { id: scriptId },
+      data: dto,
+    })
+  }
+
+  async findAll(filters: ScriptFilters) {
+    return this.db.script.findMany({
+      where: {
+        ...(filters.status && { status: filters.status }),
+        ...(filters.channelType && { channelType: filters.channelType }),
+        ...(filters.niche && { niche: filters.niche }),
+      },
+      include: { hookVariants: { orderBy: { score: 'desc' } } },
+      orderBy: { createdAt: 'desc' },
+      skip: filters.offset ?? 0,
+      take: filters.limit ?? 50,
+    })
+  }
 
   async findById(id: string) {
-    const script = await db.script.findUnique({
-      where:   { id },
-      include: {
-        hooks:     { orderBy: { score: 'desc' } },
-        revisions: { orderBy: { version: 'desc' }, take: 10 },
-      },
-    })
-    if (!script) throw new NotFoundError('Script', id)
-    return script
-  },
-
-  async findMany(filters: ScriptFilters) {
-    const { page = 1, perPage = 20, ...where } = filters
-    const [data, total] = await db.$transaction([
-      db.script.findMany({
-        where: {
-          ...(where.status        && { status:        where.status }),
-          ...(where.channelType   && { channelType:   where.channelType }),
-          ...(where.contentFormat && { contentFormat: where.contentFormat }),
-          ...(where.niche         && { niche:         where.niche }),
-          ...(where.topicId       && { topicId:       where.topicId }),
-        },
-        orderBy: { createdAt: 'desc' },
-        skip:    (page - 1) * perPage,
-        take:    perPage,
-        include: { hooks: { where: { approved: true }, take: 1 } },
-      }),
-      db.script.count({
-        where: {
-          ...(where.status      && { status:      where.status }),
-          ...(where.channelType && { channelType: where.channelType }),
-          ...(where.niche       && { niche:       where.niche }),
-        },
-      }),
-    ])
-    return { data, total, page, perPage, hasMore: page * perPage < total }
-  },
-
-  async update(id: string, dto: UpdateScriptDTO) {
-    const existing = await db.script.findUnique({ where: { id } })
-    if (!existing) throw new NotFoundError('Script', id)
-    if (dto.status) assertValidTransition(existing.status as ScriptStatus, dto.status)
-
-    return db.script.update({
+    return this.db.script.findUniqueOrThrow({
       where: { id },
-      data: {
-        ...(dto.hookText     !== undefined && { hookText:     dto.hookText }),
-        ...(dto.script       !== undefined && { script:       dto.script, wordCount: countWords(dto.script) }),
-        ...(dto.scriptBlocks !== undefined && { scriptBlocks: dto.scriptBlocks as unknown as Prisma.InputJsonValue }),
-        ...(dto.status                     && { status:       dto.status }),
-        ...(dto.rejectionNote              && { rejectionNote: dto.rejectionNote }),
-      },
+      include: { hookVariants: { orderBy: { score: 'desc' } } },
     })
-  },
+  }
 
-  async approve(id: string, dto: ApproveScriptDTO) {
-    const script = await db.script.findUnique({ where: { id } })
-    if (!script) throw new NotFoundError('Script', id)
-    if (script.status !== ScriptStatus.REVIEW) {
-      throw new ValidationError('Script must be in REVIEW status to approve')
-    }
-    assertValidTransition(script.status as ScriptStatus, ScriptStatus.APPROVED)
-    await hookService.approveHook(dto.approvedHookId)
-    return db.script.update({
-      where: { id },
-      data:  { status: ScriptStatus.APPROVED, approvedAt: new Date(), approvedBy: dto.approvedBy },
-    })
-  },
-
-  async regenerate(id: string, dto: RegenerateScriptDTO) {
-    const script = await db.script.findUnique({
-      where:   { id },
-      include: { revisions: { orderBy: { version: 'desc' }, take: 1 } },
-    })
-    if (!script) throw new NotFoundError('Script', id)
-
-    const allowedForRegen: ScriptStatus[] = [ScriptStatus.DRAFT, ScriptStatus.REJECTED]
-    if (!allowedForRegen.includes(script.status as ScriptStatus)) {
-      throw new ValidationError('Only DRAFT or REJECTED scripts can be regenerated')
-    }
-
-    const requestId = uuidv4()
-    const log = logger.child({ requestId, scriptId: id, service: 'script' })
-    await db.script.update({ where: { id }, data: { status: ScriptStatus.GENERATING } })
-
-    let hookText = script.hookText ?? ''
-
-    if (!dto.keepHook) {
-      const hookResult = await hookService.generateForScript({
-        scriptId:      id,
-        topicTitle:    script.topicTitle,
-        niche:         script.niche as import('../types').Niche,
-        channelType:   script.channelType as ChannelType,
-        contentFormat: script.contentFormat as ContentFormat,
-        targetMarkets: script.targetMarkets,
-        count:         5,
-      })
-      hookText = hookResult.topHook.text
-    }
-
-    const feedbackCtx   = dto.feedback ? `\n\nPREVIOUS VERSION FEEDBACK TO ADDRESS: ${dto.feedback}` : ''
-    const maxTokens     = script.contentFormat === ContentFormat.SHORT_FUEL ? 1500 : 6000
-    const promptVersion = script.contentFormat === ContentFormat.SHORT_FUEL ? FUEL_VERSION : DEEP_VERSION
-    const nextVersion   = (script.revisions[0]?.version ?? 0) + 1
-
-    const { parsed, meta } = await llmService.generateJson<GeneratedScript>({
-      prompt:      buildPrompt({ topicTitle: script.topicTitle, hookText, niche: script.niche, targetMarkets: script.targetMarkets, context: feedbackCtx || undefined }, script.contentFormat as ContentFormat),
-      maxTokens,
-      temperature: 0.7,
-      requestId,
-    })
-
-    const wordCount = countWords(parsed.script)
-
-    await db.$transaction([
-      db.script.update({
-        where: { id },
-        data: {
-          hookText,
-          script:            parsed.script,
-          scriptBlocks:      parsed.scriptBlocks as unknown as Prisma.InputJsonValue,
-          estimatedDuration: parsed.estimatedDuration,
-          wordCount,
-          llmModel:          meta.model,
-          promptVersion,
-          status:            ScriptStatus.DRAFT,
-          rejectionNote:     null,
-        },
-      }),
-      db.scriptRevision.create({
-        data: {
-          scriptId:  id,
-          version:   nextVersion,
-          content:   parsed.scriptBlocks as unknown as Prisma.InputJsonValue,
-          changes:   dto.feedback ?? 'Regenerated without feedback',
-          createdBy: 'AI',
-        },
-      }),
-    ])
-
-    log.info({ scriptId: id, version: nextVersion, wordCount }, 'Script regenerated')
-    return scriptService.findById(id)
-  },
-
-  async delete(id: string): Promise<void> {
-    const script = await db.script.findUnique({ where: { id } })
-    if (!script) throw new NotFoundError('Script', id)
-    if (script.status === ScriptStatus.APPROVED) {
-      throw new ValidationError('Cannot delete an approved script — archive it instead')
-    }
-    await db.script.delete({ where: { id } })
-    logger.info({ scriptId: id }, 'Script deleted')
-  },
+  async delete(id: string) {
+    return this.db.script.delete({ where: { id } })
+  }
 }

@@ -1,167 +1,132 @@
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
-import { scriptService } from '../services/script.service'
-import { hookService }   from '../services/hook.service'
-import { AppError }      from '../errors/app.errors'
-import { ChannelType, ContentFormat, Niche, ScriptStatus } from '../types'
-import { logger } from '../logger'
+import type { ScriptService } from '../services/script.service.js'
+import { ChannelType, ContentFormat, Niche, ScriptStatus } from '../types.js'
+import { logger } from '../logger.js'
 
-// ============================
-// Validation schemas (Zod)
-// ============================
+// ─── Zod Schemas ─────────────────────────────────────────────────────────────
 
-const CreateScriptSchema = z.object({
-  topicId:       z.string().uuid(),
-  topicTitle:    z.string().min(5).max(300),
-  channelType:   z.nativeEnum(ChannelType),
+const GenerateScriptSchema = z.object({
+  topicId: z.string().uuid(),
+  topicTitle: z.string().min(5).max(200),
+  channelType: z.nativeEnum(ChannelType),
   contentFormat: z.nativeEnum(ContentFormat),
-  niche:         z.nativeEnum(Niche),
-  targetMarkets: z.array(z.string().length(2)).min(1).max(10),
-  languages:     z.array(z.string().min(2).max(5)).optional(),
-  context:       z.string().max(2000).optional(),
+  niche: z.nativeEnum(Niche),
+  targetMarkets: z.array(z.string().length(2)).min(1).max(12),
+  keywords: z.array(z.string()).default([]),
+  languages: z.array(z.string()).default(['en']),
+  description: z.string().max(1000).optional(),
+})
+
+const ApproveHookSchema = z.object({
+  hookVariantId: z.string().uuid(),
 })
 
 const UpdateScriptSchema = z.object({
-  hookText:      z.string().min(10).max(500).optional(),
-  script:        z.string().min(50).optional(),
-  status:        z.nativeEnum(ScriptStatus).optional(),
-  rejectionNote: z.string().max(1000).optional(),
+  scriptFuel: z.string().optional(),
+  scriptDeep: z.string().optional(),
+  reviewNotes: z.string().optional(),
+}).refine(
+  (data) => Object.values(data).some((v) => v !== undefined),
+  { message: 'At least one field must be provided' },
+)
+
+const RejectScriptSchema = z.object({
+  reviewNotes: z.string().min(10),
+  reviewedBy: z.string().min(1),
 })
 
 const ApproveScriptSchema = z.object({
-  approvedBy:     z.string().min(1),
-  approvedHookId: z.string().uuid(),
+  approvedBy: z.string().min(1),
 })
 
-const RegenerateScriptSchema = z.object({
-  feedback: z.string().max(2000).optional(),
-  keepHook: z.boolean().optional(),
+const ListQuerySchema = z.object({
+  status: z.nativeEnum(ScriptStatus).optional(),
+  channelType: z.nativeEnum(ChannelType).optional(),
+  niche: z.nativeEnum(Niche).optional(),
+  limit: z.coerce.number().min(1).max(100).default(50),
+  offset: z.coerce.number().min(0).default(0),
 })
 
-const ListScriptsQuerySchema = z.object({
-  status:        z.nativeEnum(ScriptStatus).optional(),
-  channelType:   z.nativeEnum(ChannelType).optional(),
-  contentFormat: z.nativeEnum(ContentFormat).optional(),
-  niche:         z.nativeEnum(Niche).optional(),
-  topicId:       z.string().uuid().optional(),
-  page:          z.string().transform(Number).optional(),
-  perPage:       z.string().transform(Number).optional(),
-})
+// ─── Routes ──────────────────────────────────────────────────────────────────
 
-// ============================
-// Error handler
-// ============================
+export const scriptsRoutes: FastifyPluginAsync<{ scriptService: ScriptService }> = async (fastify, opts) => {
+  const { scriptService } = opts
 
-const handleError = (error: unknown, reply: FastifyReply) => {
-  if (error instanceof AppError) {
-    return reply.status(error.statusCode).send({
-      statusCode: error.statusCode,
-      error:      error.name,
-      message:    error.message,
-    })
-  }
-  if (error instanceof z.ZodError) {
-    return reply.status(400).send({
-      statusCode: 400,
-      error:      'ValidationError',
-      message:    'Invalid request data',
-      details:    error.flatten(),
-    })
-  }
-  logger.error({ error }, 'Unexpected error in scripts route')
-  return reply.status(500).send({
-    statusCode: 500,
-    error:      'InternalServerError',
-    message:    'An unexpected error occurred',
-  })
-}
-
-// ============================
-// Routes
-// ============================
-
-export const scriptsRoutes = async (app: FastifyInstance): Promise<void> => {
-
-  // POST /api/scripts — create script + trigger generation pipeline
-  app.post('/api/scripts', async (req, reply) => {
-    try {
-      const dto    = CreateScriptSchema.parse(req.body)
-      const result = await scriptService.create(dto)
-      const script = await scriptService.findById(result.id)
-      return reply.status(201).send(script)
-    } catch (e) { return handleError(e, reply) }
+  // POST /api/scripts/generate
+  // Creates script record + generates 5 hook variants
+  // Returns: script with hookVariants[] for human selection
+  fastify.post('/api/scripts/generate', async (request, reply) => {
+    const body = GenerateScriptSchema.parse(request.body)
+    logger.info({ topicId: body.topicId, channelType: body.channelType }, 'Generating script')
+    const script = await scriptService.generate(body)
+    return reply.status(201).send(script)
   })
 
-  // GET /api/scripts — paginated list with filters
-  app.get('/api/scripts', async (req, reply) => {
-    try {
-      const filters = ListScriptsQuerySchema.parse(req.query)
-      return reply.send(await scriptService.findMany(filters))
-    } catch (e) { return handleError(e, reply) }
+  // GET /api/scripts
+  // List with optional filters: ?status=HOOK_GENERATED&channelType=INTELLECTUAL&niche=FINANCE
+  fastify.get('/api/scripts', async (request, reply) => {
+    const query = ListQuerySchema.parse(request.query)
+    const scripts = await scriptService.findAll(query)
+    return reply.send({ data: scripts, count: scripts.length })
   })
 
-  // GET /api/scripts/:id — full script with hooks + revisions
-  app.get<{ Params: { id: string } }>('/api/scripts/:id', async (req, reply) => {
-    try {
-      return reply.send(await scriptService.findById(req.params.id))
-    } catch (e) { return handleError(e, reply) }
+  // GET /api/scripts/:id
+  fastify.get('/api/scripts/:id', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const script = await scriptService.findById(id)
+    return reply.send(script)
   })
 
-  // PATCH /api/scripts/:id — update content or status
-  app.patch<{ Params: { id: string } }>('/api/scripts/:id', async (req, reply) => {
-    try {
-      const dto = UpdateScriptSchema.parse(req.body)
-      return reply.send(await scriptService.update(req.params.id, dto))
-    } catch (e) { return handleError(e, reply) }
+  // PATCH /api/scripts/:id
+  // Human editor updates script text
+  fastify.patch('/api/scripts/:id', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const body = UpdateScriptSchema.parse(request.body)
+    const script = await scriptService.update(id, body)
+    return reply.send(script)
   })
 
-  // POST /api/scripts/:id/submit-review — DRAFT → REVIEW
-  app.post<{ Params: { id: string } }>('/api/scripts/:id/submit-review', async (req, reply) => {
-    try {
-      return reply.send(await scriptService.update(req.params.id, { status: ScriptStatus.REVIEW }))
-    } catch (e) { return handleError(e, reply) }
+  // POST /api/scripts/:id/approve-hook
+  // Human selects one of 5 hook variants — triggers full script generation
+  fastify.post('/api/scripts/:id/approve-hook', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const body = ApproveHookSchema.parse(request.body)
+    logger.info({ scriptId: id, hookVariantId: body.hookVariantId }, 'Approving hook')
+    const script = await scriptService.approveHook(id, body)
+    return reply.send(script)
   })
 
-  // POST /api/scripts/:id/approve — REVIEW → APPROVED
-  app.post<{ Params: { id: string } }>('/api/scripts/:id/approve', async (req, reply) => {
-    try {
-      const dto = ApproveScriptSchema.parse(req.body)
-      return reply.send(await scriptService.approve(req.params.id, dto))
-    } catch (e) { return handleError(e, reply) }
+  // POST /api/scripts/:id/submit
+  // Submit for human review after script generation
+  fastify.post('/api/scripts/:id/submit', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const script = await scriptService.submitForReview(id)
+    return reply.send(script)
   })
 
-  // POST /api/scripts/:id/reject — reject with note
-  app.post<{ Params: { id: string } }>('/api/scripts/:id/reject', async (req, reply) => {
-    try {
-      const body = (req.body as { note?: string }) ?? {}
-      return reply.send(await scriptService.update(req.params.id, {
-        status:        ScriptStatus.REJECTED,
-        rejectionNote: body.note,
-      }))
-    } catch (e) { return handleError(e, reply) }
+  // POST /api/scripts/:id/approve
+  // Human reviewer approves script — ready for production
+  fastify.post('/api/scripts/:id/approve', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const body = ApproveScriptSchema.parse(request.body)
+    const script = await scriptService.approve(id, body)
+    return reply.send(script)
   })
 
-  // POST /api/scripts/:id/regenerate — regenerate with optional feedback
-  app.post<{ Params: { id: string } }>('/api/scripts/:id/regenerate', async (req, reply) => {
-    try {
-      const dto = RegenerateScriptSchema.parse(req.body)
-      return reply.send(await scriptService.regenerate(req.params.id, dto))
-    } catch (e) { return handleError(e, reply) }
-  })
-
-  // POST /api/hooks/:id/approve — approve a specific hook variant
-  app.post<{ Params: { id: string } }>('/api/hooks/:id/approve', async (req, reply) => {
-    try {
-      await hookService.approveHook(req.params.id)
-      return reply.send({ success: true, hookId: req.params.id })
-    } catch (e) { return handleError(e, reply) }
+  // POST /api/scripts/:id/reject
+  // Human reviewer rejects with notes
+  fastify.post('/api/scripts/:id/reject', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const body = RejectScriptSchema.parse(request.body)
+    const script = await scriptService.reject(id, body)
+    return reply.send(script)
   })
 
   // DELETE /api/scripts/:id
-  app.delete<{ Params: { id: string } }>('/api/scripts/:id', async (req, reply) => {
-    try {
-      await scriptService.delete(req.params.id)
-      return reply.status(204).send()
-    } catch (e) { return handleError(e, reply) }
+  fastify.delete('/api/scripts/:id', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    await scriptService.delete(id)
+    return reply.status(204).send()
   })
 }

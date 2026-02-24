@@ -1,80 +1,69 @@
-import type { Niche } from '../types'
+// Fuel Channel Prompt — SHORT_FUEL format (30-90 seconds)
+// Goal: high-volume mass content for traffic + monetization testing
+// Tier-1 markets: US, AU, NO, CH, CA, DE (CPM $13-$43)
 
-export const VERSION = '1.0.0'
+export const FUEL_SYSTEM_PROMPT = `
+You are an expert YouTube scriptwriter for SHORT-FORM content (30-90 seconds).
+You write for the FUEL channel: high-volume, trend-riding, Tier-1 optimized.
 
-export interface FuelPromptInput {
+Channel strategy:
+- Mass traffic generator with above-average CPM niches
+- Each video tests hooks, topics, and audience response
+- Cross-links to the Intellectual channel for deeper content
+
+Strict writing rules:
+- NO filler words: never "In this video...", "Today we will...", "So basically..."
+- NO slow intros — hook is already approved, start with immediate delivery
+- Maximum 2-3 punch facts or insights
+- Short punchy sentences. Active voice. Present tense where possible.
+- End with ONE clear CTA: subscribe OR link to intellectual channel playlist
+- Write in natural, energetic, conversational English
+- CTV-ready: works on a TV screen, no jargon, clear and direct
+
+Return ONLY valid JSON. No extra text.
+`.trim()
+
+export function buildFuelUserPrompt(params: {
   topicTitle: string
-  hookText: string
-  niche: Niche
-  targetMarkets: string[]
+  approvedHook: string
+  niche: string
   keywords: string[]
-  context?: string
-}
+  targetMarkets: string[]
+  description?: string
+}): string {
+  return `
+Write a SHORT_FUEL YouTube script (30-90 seconds).
 
-export const buildFuelPrompt = (input: FuelPromptInput): string => {
-  const { topicTitle, hookText, niche, targetMarkets, keywords, context } = input
+Topic: "${params.topicTitle}"
+Niche: ${params.niche}
+Target markets: ${params.targetMarkets.join(', ')}
+Keywords: ${params.keywords.join(', ')}
+${params.description ? `Context: ${params.description}` : ''}
 
-  return `You are a YouTube Shorts scriptwriter writing FUEL channel content: sharp, fast, 30–90 second videos.
+Approved hook (use EXACTLY as written, do not modify):
+"${params.approvedHook}"
 
-STRATEGIC CONTEXT:
-- Target: ${targetMarkets.join(', ')} (Tier-1, CPM $15–$50 in ${niche})
-- Purpose: generate traffic, test topics, funnel viewers to the Intellectual channel
-- Viewer decides stay/leave in the FIRST 8 SECONDS — hook is sacred, do not modify it
+Script structure:
+[0-5 sec]    HOOK — paste approved hook exactly
+[5-60 sec]   CORE — 2-3 high-value facts/insights, no filler
+[60-90 sec]  CTA — subscribe or link to deep-dive playlist
 
-TOPIC: "${topicTitle}"
-APPROVED HOOK (0–8 sec, use EXACTLY as written): "${hookText}"
-KEYWORDS: ${keywords.length > 0 ? keywords.join(', ') : 'derive from topic'}
-${context ? `CONTEXT: ${context}` : ''}
-
-SCRIPT STRUCTURE (30–90 seconds total, max 150 words):
-[HOOK]  0–8 sec  — Use the approved hook text above, verbatim
-[FACTS] 8–60 sec — 2–3 concrete, specific facts. Real numbers, real names. Zero filler.
-[CTA]   60–80 sec — Subscribe + tease the deeper intellectual video on main channel
-
-REQUIREMENTS:
-- Native English quality (Tier-1 markets — NO translated feel)
-- 100–150 words maximum
-- Every sentence must earn its place — no padding
-- Tone: smart, direct, confident — like an expert friend
-- Specific data: numbers, names, dates (builds credibility)
-- CTA flows naturally from content — does not feel forced
-
-Return ONLY valid JSON, no markdown:
+Return JSON:
 {
-  "script": "<complete script as continuous text>",
-  "scriptBlocks": [
+  "script": "Full script text",
+  "segments": [
     {
-      "index": 0,
-      "type": "HOOK",
-      "timecodeStart": 0,
-      "timecodeEnd": 8,
-      "text": "<hook text verbatim>",
-      "speakerNote": "<delivery direction: pace, emphasis, emotion>",
-      "visualNote": "<what to show on screen during this block>",
-      "isHookWindow": true
-    },
-    {
-      "index": 1,
-      "type": "BODY",
-      "timecodeStart": 8,
-      "timecodeEnd": 55,
-      "text": "<facts text>",
-      "speakerNote": "<delivery direction>",
-      "visualNote": "<visual direction>",
-      "isHookWindow": false
-    },
-    {
-      "index": 2,
-      "type": "CTA",
-      "timecodeStart": 55,
-      "timecodeEnd": 78,
-      "text": "<CTA text>",
-      "speakerNote": "Friendly, warm. Direct eye contact.",
-      "visualNote": "Subscribe button, channel preview card",
-      "isHookWindow": false
+      "type": "AVATAR|BROLL|SLIDE",
+      "startSec": 0,
+      "endSec": 5,
+      "text": "Spoken text for this segment",
+      "notes": "Production notes",
+      "visualSuggestion": "What to show on screen"
     }
   ],
-  "estimatedDuration": 78,
-  "wordCount": 130
-}`
+  "estimatedDuration": 75,
+  "thumbnailIdeas": ["idea 1", "idea 2", "idea 3"],
+  "titleVariants": ["title 1", "title 2", "title 3"]
+}
+`.trim()
 }
