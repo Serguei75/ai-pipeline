@@ -1,4 +1,6 @@
 // Topic Engine — Database Schema
+// Updated: dual-channel strategy (FUEL + INTELLECTUAL)
+// Based on YouTube-maker research data
 
 datasource db {
   provider = "postgresql"
@@ -7,6 +9,20 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+}
+
+// =============================================
+// ENUMS
+// =============================================
+
+enum ChannelType {
+  FUEL          // Топливный: короткие ролики, массовый трафик
+  INTELLECTUAL  // Интеллектуальный: глубокий контент, аватары, Tier-1
+}
+
+enum ContentFormat {
+  SHORT_FUEL  // 30–90 сек: хук + факты + CTA
+  DEEP_ESSAY  // 8–15 мин: структурированный разбор
 }
 
 enum TopicSource {
@@ -27,41 +43,167 @@ enum TopicStatus {
 }
 
 enum Niche {
-  TECH
-  FINANCE
-  SAAS
-  EDUCATION
-  HEALTH
-  CRYPTO
-  MARKETING
+  FINANCE    // CPM $15–$50 — приоритет
+  SAAS       // CPM $10–$25
+  EDUCATION  // CPM $10–$25
+  HEALTH     // CPM $8–$15
+  TECH       // CPM $8–$12
+  MARKETING  // CPM $6–$10
+  CRYPTO     // CPM $5–$12
 }
 
+enum CompetitionLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ProductionStatus {
+  IDEA
+  SCRIPTING
+  RECORDING
+  EDITING
+  LOCALIZATION
+  REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+// =============================================
+// MODELS
+// =============================================
+
 model TopicCandidate {
-  id              String        @id @default(uuid())
-  title           String
-  description     String?
-  niche           Niche
-  source          TopicSource
-  status          TopicStatus   @default(PENDING)
+  id             String          @id @default(uuid())
+  title          String
+  description    String?
 
-  targetMarkets   String[]
+  // Канал и формат
+  channelType    ChannelType     @default(FUEL)
+  contentFormat  ContentFormat   @default(SHORT_FUEL)
 
-  forShort        Boolean       @default(true)
-  forDeep         Boolean       @default(true)
+  niche          Niche
+  source         TopicSource
+  status         TopicStatus     @default(PENDING)
 
-  trendingScore   Float?
-  estimatedCPM    Float?
-  keywords        String[]
+  // Tier-1 рынки (US, CA, AU, NO, CH, DE, GB...)
+  targetMarkets  String[]
+  languages      String[]        @default(["en"])
 
-  sourceUrl       String?
-  sourceData      Json?
+  // Метрики монетизации
+  estimatedCPM   Float?
+  trendingScore  Float?          // 0–100
+  competitionLevel CompetitionLevel?
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  approvedAt      DateTime?
-  approvedBy      String?
+  // Hook-анализ (0–8 сек — критически важно)
+  hookIdeas      String[]
+  hookScore      Float?          // оценка силы хука 0–100
+
+  // Содержание
+  keywords       String[]
+  sourceUrl      String?
+  sourceData     Json?
+
+  // Связи с продакшеном
+  production     ContentProduction?
+
+  // Админ
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  approvedAt     DateTime?
+  approvedBy     String?
 
   @@index([status])
+  @@index([channelType])
   @@index([niche])
   @@index([source])
+  @@index([channelType, status])
+}
+
+model ContentProduction {
+  id             String          @id @default(uuid())
+
+  topic          TopicCandidate  @relation(fields: [topicId], references: [id])
+  topicId        String          @unique
+
+  channelType    ChannelType
+  status         ProductionStatus @default(IDEA)
+
+  // Сценарии
+  scriptFuel     String?         // 30–90 сек скрипт
+  scriptDeep     String?         // 8–15 мин скрипт
+
+  // Hook (0–8 сек — отдельный этап!)
+  hookText       String?
+  hookScore      Float?
+  hookApproved   Boolean         @default(false)
+
+  // Озвучка
+  voiceConfig    Json?           // TTS настройки
+  audioFiles     Json?           // URL аудиофайлов по языкам
+
+  // Аватары и видео
+  avatarConfig   Json?           // HeyGen/D-ID настройки
+  videoUrl       String?
+  thumbnailUrl   String?
+
+  // Локализация
+  languages      String[]        @default(["en"])
+  subtitles      Json?           // { "en": "url", "de": "url" }
+  dubbing        Json?           // { "de": "url", "es": "url" }
+
+  // Экономика
+  estimatedCost  Float?          // $ производства
+  actualCost     Float?          // $ факт
+
+  // YouTube
+  youtubeVideoId String?         @unique
+  publishedAt    DateTime?
+
+  // После-публикация метрики
+  analytics      VideoAnalytics?
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([status])
+  @@index([channelType])
+}
+
+model VideoAnalytics {
+  id               String           @id @default(uuid())
+
+  production       ContentProduction @relation(fields: [productionId], references: [id])
+  productionId     String           @unique
+
+  // Ключевые CTV-метрики из исследования
+  views            Int              @default(0)
+  retention8sec    Float?           // % удержания на 8-й сек (цель: >80%)
+  retention60sec   Float?           // % удержания на 60-й сек (цель: >50%)
+  avgRetention     Float?           // среднее удержание
+  ctvShare         Float?           // % просмотров с ТВ (ориентир: ~45%)
+
+  ctr              Float?           // CTR обложки (цель: >4%)
+  rpm              Float?           // RPM в $ (цель Tier-1: >$8)
+  revenueTotal     Float?           // общий доход $
+
+  // Геоданные (Tier-1 vs other)
+  viewsByCountry   Json?            // { "US": 5000, "NO": 800 }
+  revByCountry     Json?            // { "US": 80.0, "NO": 22.4 }
+
+  // Социальное
+  comments         Int              @default(0)
+  likes            Int              @default(0)
+  shares           Int              @default(0)
+  commentsGrowth   Float?           // % роста (ориентир: +38%)
+
+  // Сигналы для обратной связи
+  needsHookRevision   Boolean       @default(false)  // плохой retention@8sec
+  needsNicheRevision  Boolean       @default(false)  // низкий RPM
+
+  recordedAt       DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([rpm])
+  @@index([retention8sec])
 }
