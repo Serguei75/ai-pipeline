@@ -1,0 +1,20 @@
+{
+  "name": "@ai-pipeline/mcp-adapter",
+  "version": "1.0.0",
+  "description": "Shared MCP (Model Context Protocol) HTTP adapter for AI Pipeline Fastify services",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify-plugin": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "fastify": "^4.28.0",
+    "typescript": "^5.4.0"
+  },
+  "keywords": ["mcp", "model-context-protocol", "fastify", "nanobot", "ai-agent"],
+  "license": "MIT"
+}
