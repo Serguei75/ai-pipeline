@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChannelType {
+  FUEL
+  INTELLECTUAL
+}
+
+enum CommentType {
+  QUESTION
+  FEEDBACK
+  PRAISE
+  CRITICISM
+  SPAM
+  IDEA
+  UNKNOWN
+}
+
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum DraftStatus {
+  NEW
+  APPROVED
+  EDITED
+  SENT
+  DECLINED
+}
+
+model YoutubeVideo {
+  id          String    @id @default(uuid())
+  youtubeId   String    @unique
+  title       String
+  channelType ChannelType
+  publishedAt DateTime
+  comments    Comment[]
+  createdAt   DateTime  @default(now())
+
+  @@index([channelType])
+}
+
+model Comment {
+  id          String    @id @default(uuid())
+  youtubeId   String    @unique // YouTube comment ID
+  videoId     String
+  video       YoutubeVideo @relation(fields: [videoId], references: [id])
+  channelType ChannelType
+
+  // Comment content
+  author      String
+  authorId    String?
+  text        String    @db.Text
+  language    String    @default("en")
+  likeCount   Int       @default(0)
+  publishedAt DateTime
+
+  // AI Classification
+  type        CommentType  @default(UNKNOWN)
+  sentiment   Sentiment    @default(NEUTRAL)
+  topic       String?
+  tags        String[]
+  isProcessed Boolean   @default(false)
+
+  // Reply
+  replyDraft  CommentReplyDraft?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([channelType, type])
+  @@index([isProcessed])
+  @@index([videoId])
+}
+
+model CommentReplyDraft {
+  id            String      @id @default(uuid())
+  commentId     String      @unique
+  comment       Comment     @relation(fields: [commentId], references: [id])
+
+  proposedReply String      @db.Text
+  editedReply   String?     @db.Text
+  finalReply    String?     @db.Text
+
+  status        DraftStatus @default(NEW)
+  approvedBy    String?
+  approvedAt    DateTime?
+  sentAt        DateTime?
+  declineReason String?
+
+  // Audit
+  generatedBy   String      @default("gpt-4o-mini")
+  promptVersion String      @default("v1")
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model TopicSuggestion {
+  id          String    @id @default(uuid())
+  source      String    @default("comments")
+  question    String    @db.Text
+  frequency   Int       @default(1)
+  channelType ChannelType
+  language    String    @default("en")
+  exportedAt  DateTime?
+  exportedToTopicId String?
+  createdAt   DateTime  @default(now())
+
+  @@index([exportedAt])
+  @@index([frequency(sort: Desc)])
+}
+
+model SyncLog {
+  id          String    @id @default(uuid())
+  videoId     String?
+  syncedCount Int       @default(0)
+  status      String    @default("success")
+  error       String?
+  createdAt   DateTime  @default(now())
+}

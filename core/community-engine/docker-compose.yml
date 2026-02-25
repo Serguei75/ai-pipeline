@@ -1,0 +1,35 @@
+version: '3.8'
+services:
+  postgres-community:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: community_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - '5437:5432'
+    volumes:
+      - community_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  community-engine:
+    build: .
+    ports:
+      - '3006:3006'
+    environment:
+      PORT: 3006
+      DATABASE_URL: postgresql://postgres:password@postgres-community:5432/community_engine
+      NODE_ENV: production
+    env_file:
+      - .env
+    depends_on:
+      postgres-community:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  community_pg_data:
