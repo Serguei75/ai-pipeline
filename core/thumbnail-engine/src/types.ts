@@ -1,35 +1,62 @@
-export type Provider = 'HUGGINGFACE' | 'FAL' | 'CLOUDFLARE' | 'MOCK';
-export type AspectRatio = 'LANDSCAPE_16_9' | 'PORTRAIT_9_16' | 'SQUARE_1_1';
+/**
+ * Thumbnail Engine types
+ * Feb 2026 stack:
+ *   Imagen 4 Fast    — $0.02/img  (default, Batch = $0.01/img)
+ *   Imagen 4 Standard — $0.04/img  (quality tier)
+ *   Imagen 4 Ultra   — $0.06/img  (max quality, slow)
+ *   GPT Image 1.5    — $0.04/img  (A/B alternative, highest Elo 1264)
+ *
+ * DALL-E 3 and Stability AI are legacy as of 2026 — not used.
+ */
 
-export interface GenerateRequest {
+export type ImageProvider = 'imagen4-fast' | 'imagen4-standard' | 'imagen4-ultra' | 'gpt-image-1.5';
+export type AspectRatio = '16:9' | '1:1' | '9:16';
+export type ThumbnailStyle = 'dramatic' | 'clean' | 'curiosity' | 'fear' | 'surprise' | 'desire';
+export type ChannelType = 'FUEL' | 'INTELLECTUAL';
+
+export interface ThumbnailRequest {
+  videoTitle: string;
+  hookText: string;
+  hookEmotion: string;
+  niche: string;
+  targetMarket: string;
+  channelType: ChannelType;
+  /** Number of variants to generate (default: 3) */
+  variants?: number;
+  /** Aspect ratios to generate (default: ['16:9']) */
+  aspectRatios?: AspectRatio[];
+  /** Override auto-selected provider */
+  provider?: ImageProvider;
+  /** Use fast/cheap tier for drafts */
+  draft?: boolean;
+}
+
+export interface ThumbnailVariant {
+  id: string;
+  provider: ImageProvider;
+  aspectRatio: AspectRatio;
+  style: ThumbnailStyle;
   prompt: string;
-  negativePrompt?: string;
-  videoId?: string;
-  aspectRatio?: AspectRatio;
-  providerOverride?: Provider;
-  steps?: number;
+  imageBase64?: string;
+  imageUrl?: string;
+  storagePath?: string;
+  ctvOptimised: boolean;
+  costUsd: number;
+  generatedAt: string;
+}
+
+export interface ThumbnailResult {
+  videoTitle: string;
+  variants: ThumbnailVariant[];
+  totalCostUsd: number;
+  recommendedVariantId: string;
+  abTestingGroups: { a: string; b: string };
 }
 
 export interface ProviderConfig {
-  width: number;
-  height: number;
-}
-
-export const ASPECT_CONFIGS: Record<AspectRatio, ProviderConfig> = {
-  LANDSCAPE_16_9: { width: 1280, height: 720  },  // YouTube стандарт
-  PORTRAIT_9_16:  { width: 720,  height: 1280 },  // Shorts
-  SQUARE_1_1:     { width: 1024, height: 1024 },  // Универсальный
-};
-
-export interface IProvider {
-  name: Provider;
-  generate(
-    prompt: string,
-    config: ProviderConfig,
-    negativePrompt?: string
-  ): Promise<{
-    imageBuffer: Buffer;
-    model: string;
-    costUsd: number;
-  }>;
+  pricePerImage: number;
+  model: string;
+  maxVariantsPerCall: number;
+  supportsBatch: boolean;
+  avgEloScore: number;
 }

@@ -1,107 +1,69 @@
-# 🎨 Thumbnail Engine — Module 9
+# 🖼 Thumbnail Engine
 
-AI-powered multi-provider thumbnail generator for YouTube pipeline.
+AI thumbnail generation for the AI Pipeline system.
 
-## 📡 Port
-**3009**
+## Stack (Feb 2026)
 
-## 🎭 Провайдеры
+| Provider | Price/img | Elo | Use case |
+|----------|-----------|-----|----------|
+| **Imagen 4 Fast** | **$0.02** ($0.01 batch) | 1,225 | Default — drafts + bulk |
+| Imagen 4 Standard | $0.04 | 1,230 | Production quality |
+| Imagen 4 Ultra | $0.06 | 1,240 | Final approved video |
+| GPT Image 1.5 | $0.04 | **1,264** | A/B test winner variant |
 
-| Провайдер | Модель по умолчанию | Бесплатно | Цена/изображение |
-|---|---|---|---|
-| **HuggingFace** | FLUX.1-schnell | ✅ Free tier | $0 |
-| **FAL.AI** | fal-ai/flux/schnell | 💰 Кредиты при регистрации | $0.003–$0.025 |
-| **Cloudflare** | flux-1-schnell | ✅ 10k units/day | $0 |
-| **Mock** | placeholder | ✅ Dev only | $0 |
+> ⚠️ **DALL-E 3 and Stability AI are legacy as of 2026** and NOT used in this engine.
 
-### Переключение провайдера
-```bash
-THUMBNAIL_DEFAULT_PROVIDER=HUGGINGFACE  # По умолчанию
-THUMBNAIL_DEFAULT_PROVIDER=FAL          # Высокое качество
-THUMBNAIL_DEFAULT_PROVIDER=CLOUDFLARE  # Self-hosted edge
-THUMBNAIL_DEFAULT_PROVIDER=MOCK        # Локальная разработка
+## Cost per video
+
+```
+Default (3 Imagen Standard + 1 GPT Image): 3×$0.04 + 1×$0.04 = $0.16
+Draft mode (3 Imagen Fast):                3×$0.02           = $0.06
+Batch mode (3 Imagen Fast via Batch API):  3×$0.01           = $0.03
 ```
 
-Или override на уровне запроса через `providerOverride`.
-
-## 🚀 API
+## API
 
 ### `POST /thumbnails/generate`
-
-**Request:**
 ```json
 {
-  "prompt": "YouTube thumbnail: AI revolution 2026, bold text, high contrast, CTV-optimized",
-  "negativePrompt": "blurry, low quality, watermark",
-  "videoId": "abc123",
-  "aspectRatio": "LANDSCAPE_16_9",
-  "providerOverride": "huggingface"
+  "videoTitle": "Why Most People Never Get Rich",
+  "hookText": "You’re one decision away from a completely different life",
+  "hookEmotion": "DESIRE",
+  "niche": "personal-finance",
+  "targetMarket": "US",
+  "channelType": "INTELLECTUAL",
+  "variants": 3,
+  "aspectRatios": ["16:9"],
+  "draft": false
 }
 ```
 
-**Response:**
-```json
-{
-  "jobId": "clzabc123",
-  "imageUrl": "http://localhost:3009/static/clzabc123.png",
-  "provider": "HUGGINGFACE",
-  "model": "black-forest-labs/FLUX.1-schnell",
-  "width": 1280,
-  "height": 720,
-  "costUsd": 0,
-  "durationMs": 4521
-}
+Response includes:
+- `variants[]` — all generated thumbnails with storage paths
+- `recommendedVariantId` — highest quality pick
+- `abTestingGroups.a/b` — variant IDs for A/B test
+- `totalCostUsd` — actual cost of this generation
+
+### `POST /thumbnails/:variantId/upgrade-ultra`
+Upgrade a variant to Imagen 4 Ultra after A/B winner is chosen.
+
+### `GET /thumbnails/providers`
+List all providers with current pricing.
+
+## Flow
+
+```
+Script Engine (approved script)
+    ↓ videoTitle + hookText + emotion
+Thumbnail Engine
+    ↓ Gemini 2.5 Flash-Lite → generate N CTV-optimised prompts
+    ↓ Imagen 4 Standard × N variants
+    ↓ GPT Image 1.5 × 1 A/B variant (highest Elo)
+Object Storage (GCS / local dev)
+    ↓
+Admin UI / Telegram Bot (select winner)
+    ↓
+Media Engine (use winning thumbnail)
 ```
 
-### Aspect Ratios
-| Значение | Размер | Использование |
-|---|---|---|
-| `LANDSCAPE_16_9` | 1280×720 | YouTube стандарт |
-| `PORTRAIT_9_16` | 720×1280 | Shorts |
-| `SQUARE_1_1` | 1024×1024 | Универсальный |
-
-### Остальные эндпоинты
-```
-GET  /thumbnails               — список с пагинацией
-GET  /thumbnails/:id           — конкретный job
-GET  /thumbnails/stats         — статистика + расходы
-DELETE /thumbnails/:id         — удалить job + файл
-GET  /health                   — статус сервиса
-GET  /static/:filename         — скачать изображение
-```
-
-## 🔧 Установка
-
-```bash
-cd core/thumbnail-engine
-cp .env.example .env
-
-# Получи бесплатный HuggingFace токен:
-# https://huggingface.co/settings/tokens
-echo "HUGGINGFACE_API_KEY=hf_xxx" >> .env
-
-docker compose up -d
-```
-
-## 📊 Events (Event Bus)
-
-Модуль публикует в Redis Stream `ai-pipeline:events`:
-
-| Event | Payload |
-|---|---|
-| `thumbnail.generated` | `{ jobId, videoId, imageUrl, provider, model, durationMs, costUsd }` |
-| `thumbnail.failed` | `{ jobId, videoId, provider, errorMessage }` |
-
-## 📰 Тест
-
-```bash
-# Через API Gateway
-curl -X POST http://localhost:3100/thumbnails/generate \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "AI YouTube thumbnail: modern tech 2026"}'
-
-# Напрямую
-curl -X POST http://localhost:3009/thumbnails/generate \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Test thumbnail", "providerOverride": "mock"}'
-```
+## Port: 3009
