@@ -1,10 +1,29 @@
-# AI Pipeline — Full Stack Orchestration
-# 6 microservices · 5 PostgreSQL databases · Redis
+# AI Pipeline — Full System Orchestration
+# 14 services · 8 PostgreSQL databases · Redis Event Bus
 #
-# Start:  docker-compose up -d
-# Stop:   docker-compose down
-# Logs:   docker-compose logs -f <service>
-# Seed:   docker-compose exec topic-engine npm run prisma:seed
+# Quick start:
+#   cp .env.example .env   # fill in API keys
+#   docker-compose up -d
+#
+# Logs:  docker-compose logs -f <service>
+# Stop:  docker-compose down
+# Reset: docker-compose down -v   (WARNING: deletes all data)
+#
+# Service map:
+#   :3000  admin-ui          (Next.js dashboard)
+#   :3001  topic-engine
+#   :3002  script-engine     (LLM Router → Gemini 2.5 Flash)
+#   :3003  voice-engine      (Imagen4 / Fish Audio / Kokoro)
+#   :3004  media-engine      (HeyGen + Pexels)
+#   :3005  analytics-engine  (YouTube + AI insights)
+#   :3006  community-engine
+#   :3007  localization-engine
+#   :3008  hook-tester
+#   :3009  thumbnail-engine  (Imagen 4 Fast/Std/Ultra + GPT Image 1.5)
+#   :3010  cost-tracker      (real-time P&L per video)
+#   :3100  api-gateway
+#   :6379  redis             (Event Bus)
+#   —      telegram-bot      (push notifications + approve/reject)
 
 version: '3.9'
 
@@ -18,9 +37,13 @@ volumes:
   voice_data:
   media_data:
   analytics_data:
+  community_data:
+  localization_data:
+  cost_data:
   redis_data:
+  thumbnail_storage:
 
-# ── Reusable snippets ──────────────────────────────────────────────────
+# ── Reusable snippets ─────────────────────────────────────────────────────────────────────────────────────────────────
 x-service: &service
   restart: unless-stopped
   networks: [pipeline]
@@ -36,12 +59,23 @@ x-svc-health: &svc-health
   interval: 30s
   timeout: 10s
   retries: 3
-  start_period: 15s
+  start_period: 20s
+
+# Common env vars shared across all services
+x-llm-env: &llm-env
+  GEMINI_API_KEY: ${GEMINI_API_KEY}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+
+x-tts-env: &tts-env
+  HF_TOKEN: ${HF_TOKEN:-}
+  GOOGLE_TTS_API_KEY: ${GOOGLE_TTS_API_KEY:-}
+  FISH_AUDIO_API_KEY: ${FISH_AUDIO_API_KEY:-}
+  RESEMBLE_API_KEY: ${RESEMBLE_API_KEY:-}
 
 services:
 
   # ═══════════════════════════════════════════════════════════════════
-  # REDIS — shared cache
+  # INFRASTRUCTURE
   # ═══════════════════════════════════════════════════════════════════
   redis:
     <<: *service
@@ -49,7 +83,7 @@ services:
     container_name: ai-pipeline-redis
     ports: ['6379:6379']
     volumes: [redis_data:/data]
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
@@ -57,7 +91,7 @@ services:
       retries: 5
 
   # ═══════════════════════════════════════════════════════════════════
-  # DATABASES
+  # DATABASES (one per domain service)
   # ═══════════════════════════════════════════════════════════════════
   topic-db:
     <<: *service
@@ -104,23 +138,51 @@ services:
     volumes: [analytics_data:/var/lib/postgresql/data]
     healthcheck: *pg-health
 
+  community-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: community-engine-db
+    ports: ['5437:5432']
+    environment: { POSTGRES_DB: community_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [community_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  localization-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: localization-engine-db
+    ports: ['5438:5432']
+    environment: { POSTGRES_DB: localization_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [localization_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  cost-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: cost-tracker-db
+    ports: ['5439:5432']
+    environment: { POSTGRES_DB: cost_tracker, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    volumes: [cost_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
   # ═══════════════════════════════════════════════════════════════════
-  # MICROSERVICES
+  # CORE MICROSERVICES
   # ═══════════════════════════════════════════════════════════════════
+
   topic-engine:
     <<: *service
     build: { context: ./core/topic-engine, dockerfile: Dockerfile }
     container_name: topic-engine
     ports: ['3001:3001']
     environment:
+      <<: *llm-env
       NODE_ENV: production
-      PORT: 3001
+      PORT: '3001'
       DATABASE_URL: postgresql://postgres:postgres@topic-db:5432/topic_engine
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
-      LOG_LEVEL: info
+      REDIS_URL: redis://redis:6379
     depends_on:
       topic-db: { condition: service_healthy }
+      redis:    { condition: service_healthy }
     healthcheck:
       <<: *svc-health
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
@@ -131,15 +193,16 @@ services:
     container_name: script-engine
     ports: ['3002:3002']
     environment:
+      <<: *llm-env
       NODE_ENV: production
-      PORT: 3002
+      PORT: '3002'
       DATABASE_URL: postgresql://postgres:postgres@script-db:5432/script_engine
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      REDIS_URL: redis://redis:6379
       TOPIC_ENGINE_URL: http://topic-engine:3001
-      LOG_LEVEL: info
     depends_on:
-      script-db: { condition: service_healthy }
+      script-db:    { condition: service_healthy }
       topic-engine: { condition: service_healthy }
+      redis:        { condition: service_healthy }
     healthcheck:
       <<: *svc-health
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
@@ -150,17 +213,16 @@ services:
     container_name: voice-engine
     ports: ['3003:3003']
     environment:
+      <<: *tts-env
       NODE_ENV: production
-      PORT: 3003
+      PORT: '3003'
       DATABASE_URL: postgresql://postgres:postgres@voice-db:5432/voice_engine
-      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      REDIS_URL: redis://redis:6379
       SCRIPT_ENGINE_URL: http://script-engine:3002
-      UPLOAD_DIR: /app/uploads/audio
-      BASE_URL: ${VOICE_ENGINE_PUBLIC_URL:-http://localhost:3003}
-      LOG_LEVEL: info
     depends_on:
-      voice-db: { condition: service_healthy }
+      voice-db:      { condition: service_healthy }
       script-engine: { condition: service_healthy }
+      redis:         { condition: service_healthy }
     healthcheck:
       <<: *svc-health
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1']
@@ -172,18 +234,17 @@ services:
     ports: ['3004:3004']
     environment:
       NODE_ENV: production
-      PORT: 3004
+      PORT: '3004'
       DATABASE_URL: postgresql://postgres:postgres@media-db:5432/media_engine
+      REDIS_URL: redis://redis:6379
       HEYGEN_API_KEY: ${HEYGEN_API_KEY}
       PEXELS_API_KEY: ${PEXELS_API_KEY}
       SCRIPT_ENGINE_URL: http://script-engine:3002
-      VOICE_ENGINE_URL: http://voice-engine:3003
-      UPLOAD_DIR: /app/uploads/media
-      BASE_URL: ${MEDIA_ENGINE_PUBLIC_URL:-http://localhost:3004}
-      LOG_LEVEL: info
+      VOICE_ENGINE_URL:  http://voice-engine:3003
     depends_on:
-      media-db: { condition: service_healthy }
-      voice-engine: { condition: service_healthy }
+      media-db:      { condition: service_healthy }
+      voice-engine:  { condition: service_healthy }
+      redis:         { condition: service_healthy }
     healthcheck:
       <<: *svc-health
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1']
@@ -194,21 +255,159 @@ services:
     container_name: analytics-engine
     ports: ['3005:3005']
     environment:
+      <<: *llm-env
       NODE_ENV: production
-      PORT: 3005
+      PORT: '3005'
       DATABASE_URL: postgresql://postgres:postgres@analytics-db:5432/analytics_engine
+      REDIS_URL: redis://redis:6379
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
-      YOUTUBE_OAUTH_TOKEN: ${YOUTUBE_OAUTH_TOKEN:-}
-      SCRIPT_ENGINE_URL: http://script-engine:3002
-      LOG_LEVEL: info
+      YOUTUBE_OAUTH_CLIENT_ID: ${YOUTUBE_OAUTH_CLIENT_ID:-}
+      YOUTUBE_OAUTH_CLIENT_SECRET: ${YOUTUBE_OAUTH_CLIENT_SECRET:-}
+      YOUTUBE_REFRESH_TOKEN: ${YOUTUBE_REFRESH_TOKEN:-}
     depends_on:
       analytics-db: { condition: service_healthy }
+      redis:        { condition: service_healthy }
     healthcheck:
       <<: *svc-health
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1']
 
+  community-engine:
+    <<: *service
+    build: { context: ./core/community-engine, dockerfile: Dockerfile }
+    container_name: community-engine
+    ports: ['3006:3006']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3006'
+      DATABASE_URL: postgresql://postgres:postgres@community-db:5432/community_engine
+      REDIS_URL: redis://redis:6379
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      ANALYTICS_ENGINE_URL: http://analytics-engine:3005
+    depends_on:
+      community-db:     { condition: service_healthy }
+      analytics-engine: { condition: service_healthy }
+      redis:            { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3006/health || exit 1']
+
+  localization-engine:
+    <<: *service
+    build: { context: ./core/localization-engine, dockerfile: Dockerfile }
+    container_name: localization-engine
+    ports: ['3007:3007']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3007'
+      DATABASE_URL: postgresql://postgres:postgres@localization-db:5432/localization_engine
+      REDIS_URL: redis://redis:6379
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+      MEDIA_ENGINE_URL:  http://media-engine:3004
+    depends_on:
+      localization-db: { condition: service_healthy }
+      script-engine:   { condition: service_healthy }
+      redis:           { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3007/health || exit 1']
+
+  hook-tester:
+    <<: *service
+    build: { context: ./core/hook-tester, dockerfile: Dockerfile }
+    container_name: hook-tester
+    ports: ['3008:3008']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3008'
+      REDIS_URL: redis://redis:6379
+      ANALYTICS_ENGINE_URL: http://analytics-engine:3005
+      SCRIPT_ENGINE_URL:    http://script-engine:3002
+    depends_on:
+      analytics-engine: { condition: service_healthy }
+      redis:            { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3008/health || exit 1']
+
+  thumbnail-engine:
+    <<: *service
+    build: { context: ./core/thumbnail-engine, dockerfile: Dockerfile }
+    container_name: thumbnail-engine
+    ports: ['3009:3009']
+    volumes:
+      - thumbnail_storage:/app/storage
+    environment:
+      NODE_ENV: production
+      PORT: '3009'
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      REDIS_URL: redis://redis:6379
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-ai-pipeline-thumbnails}
+      STORAGE_BASE_URL: ${STORAGE_BASE_URL:-}
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3009/costs/health || exit 1']
+
+  cost-tracker:
+    <<: *service
+    build: { context: ./core/cost-tracker, dockerfile: Dockerfile }
+    container_name: cost-tracker
+    ports: ['3010:3010']
+    environment:
+      NODE_ENV: production
+      PORT: '3010'
+      DATABASE_URL: postgresql://postgres:postgres@cost-db:5432/cost_tracker
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      cost-db: { condition: service_healthy }
+      redis:   { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3010/costs/health || exit 1']
+
   # ═══════════════════════════════════════════════════════════════════
-  # ADMIN UI — Next.js 14 (port 3000)
+  # API GATEWAY :3100
+  # ═══════════════════════════════════════════════════════════════════
+  api-gateway:
+    <<: *service
+    build: { context: ./apps/api-gateway, dockerfile: Dockerfile }
+    container_name: api-gateway
+    ports: ['3100:3100']
+    environment:
+      NODE_ENV: production
+      PORT: '3100'
+      TOPIC_ENGINE_URL:        http://topic-engine:3001
+      SCRIPT_ENGINE_URL:       http://script-engine:3002
+      VOICE_ENGINE_URL:        http://voice-engine:3003
+      MEDIA_ENGINE_URL:        http://media-engine:3004
+      ANALYTICS_ENGINE_URL:    http://analytics-engine:3005
+      COMMUNITY_ENGINE_URL:    http://community-engine:3006
+      LOCALIZATION_ENGINE_URL: http://localization-engine:3007
+      HOOK_TESTER_URL:         http://hook-tester:3008
+      THUMBNAIL_ENGINE_URL:    http://thumbnail-engine:3009
+      COST_TRACKER_URL:        http://cost-tracker:3010
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      topic-engine:        { condition: service_healthy }
+      script-engine:       { condition: service_healthy }
+      voice-engine:        { condition: service_healthy }
+      media-engine:        { condition: service_healthy }
+      analytics-engine:    { condition: service_healthy }
+      community-engine:    { condition: service_healthy }
+      localization-engine: { condition: service_healthy }
+      thumbnail-engine:    { condition: service_healthy }
+      cost-tracker:        { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/health || exit 1']
+
+  # ═══════════════════════════════════════════════════════════════════
+  # ADMIN UI :3000  (Next.js dashboard)
   # ═══════════════════════════════════════════════════════════════════
   admin-ui:
     <<: *service
@@ -217,17 +416,35 @@ services:
     ports: ['3000:3000']
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_TOPIC_ENGINE_URL:     ${TOPIC_ENGINE_PUBLIC_URL:-http://localhost:3001}
-      NEXT_PUBLIC_SCRIPT_ENGINE_URL:    ${SCRIPT_ENGINE_PUBLIC_URL:-http://localhost:3002}
-      NEXT_PUBLIC_VOICE_ENGINE_URL:     ${VOICE_ENGINE_PUBLIC_URL:-http://localhost:3003}
-      NEXT_PUBLIC_MEDIA_ENGINE_URL:     ${MEDIA_ENGINE_PUBLIC_URL:-http://localhost:3004}
-      NEXT_PUBLIC_ANALYTICS_ENGINE_URL: ${ANALYTICS_ENGINE_PUBLIC_URL:-http://localhost:3005}
+      NEXT_PUBLIC_API_GATEWAY_URL:      ${API_GATEWAY_URL:-http://localhost:3100}
+      NEXT_PUBLIC_TOPIC_ENGINE_URL:     http://topic-engine:3001
+      NEXT_PUBLIC_SCRIPT_ENGINE_URL:    http://script-engine:3002
+      NEXT_PUBLIC_VOICE_ENGINE_URL:     http://voice-engine:3003
+      NEXT_PUBLIC_MEDIA_ENGINE_URL:     http://media-engine:3004
+      NEXT_PUBLIC_ANALYTICS_ENGINE_URL: http://analytics-engine:3005
+      NEXT_PUBLIC_COMMUNITY_ENGINE_URL: http://community-engine:3006
+      NEXT_PUBLIC_LOCALIZATION_URL:     http://localization-engine:3007
+      NEXT_PUBLIC_THUMBNAIL_ENGINE_URL: http://thumbnail-engine:3009
+      NEXT_PUBLIC_COST_TRACKER_URL:     http://cost-tracker:3010
     depends_on:
-      topic-engine:     { condition: service_healthy }
-      script-engine:    { condition: service_healthy }
-      voice-engine:     { condition: service_healthy }
-      media-engine:     { condition: service_healthy }
-      analytics-engine: { condition: service_healthy }
+      api-gateway: { condition: service_healthy }
     healthcheck:
       <<: *svc-health
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3000 || exit 1']
+
+  # ═══════════════════════════════════════════════════════════════════
+  # TELEGRAM BOT  (no port — uses long-polling)
+  # ═══════════════════════════════════════════════════════════════════
+  telegram-bot:
+    <<: *service
+    build: { context: ./apps/telegram-bot, dockerfile: Dockerfile }
+    container_name: ai-pipeline-telegram-bot
+    environment:
+      NODE_ENV: production
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID}
+      API_GATEWAY_URL: http://api-gateway:3100
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      api-gateway: { condition: service_healthy }
+      redis:       { condition: service_healthy }
