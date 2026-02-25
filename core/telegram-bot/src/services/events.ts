@@ -12,7 +12,11 @@ type NotifiableEvent =
   | 'topic.pending_approval'
   | 'script.pending_approval'
   | 'analytics.niche_underperforming'
-  | 'hook_tester.winner_selected';
+  | 'hook_tester.winner_selected'
+  | 'thumbnail.generated'
+  | 'thumbnail.failed'
+  | 'thumbnail.ab_test_created'
+  | 'thumbnail.ab_test_winner';
 
 interface EventEntry {
   id: string;
@@ -33,22 +37,21 @@ export class EventConsumer {
       port: parseInt(process.env.REDIS_PORT || '6379'),
       lazyConnect: true,
     });
-
-    // Load allowed chat IDs from env
-    const ids = (process.env.ALLOWED_CHAT_IDS || '').split(',').map(s => parseInt(s.trim())).filter(Boolean);
+    const ids = (process.env.ALLOWED_CHAT_IDS || '')
+      .split(',')
+      .map(s => parseInt(s.trim()))
+      .filter(Boolean);
     ids.forEach(id => this.chatIds.add(id));
   }
 
-  addChatId(chatId: number) {
-    this.chatIds.add(chatId);
-  }
+  addChatId(chatId: number) { this.chatIds.add(chatId); }
 
   private async ensureGroup() {
     try {
       await this.redis.xgroup('CREATE', STREAM_KEY, CONSUMER_GROUP, '$', 'MKSTREAM');
     } catch (e: any) {
       if (!e.message?.includes('BUSYGROUP')) {
-        console.warn('Could not create consumer group (Redis may be unavailable):', e.message);
+        console.warn('Consumer group:', e.message);
       }
     }
   }
@@ -72,9 +75,7 @@ export class EventConsumer {
 
   private parseFields(rawFields: string[]): Record<string, string> {
     const result: Record<string, string> = {};
-    for (let i = 0; i < rawFields.length; i += 2) {
-      result[rawFields[i]] = rawFields[i + 1];
-    }
+    for (let i = 0; i < rawFields.length; i += 2) result[rawFields[i]] = rawFields[i + 1];
     return result;
   }
 
@@ -83,8 +84,7 @@ export class EventConsumer {
       try {
         const results = await (this.redis as any).xreadgroup(
           'GROUP', CONSUMER_GROUP, CONSUMER_NAME,
-          'COUNT', '10',
-          'BLOCK', '5000',
+          'COUNT', '10', 'BLOCK', '5000',
           'STREAMS', STREAM_KEY, '>'
         ) as Array<[string, Array<[string, string[]]>]> | null;
 
@@ -113,11 +113,13 @@ export class EventConsumer {
     const { type, payload } = entry;
 
     switch (type as NotifiableEvent) {
+
+      // ── Аналитика ─────────────────────────────────────────────────
       case 'analytics.hook_weak':
         return {
           text:
             `⚠️ *Слабый хук обнаружен!*\n\n` +
-            `📹 Видео ID: \`${payload.videoId ?? 'N/A'}\`\n` +
+            `📹 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
             `📉 Retention 0–8s: *${payload.retention8s ?? 0}%* (норма > 40%)\n` +
             `🎣 Хук: "${payload.hook ?? 'N/A'}"\n\n` +
             `_Скрипт помечен для доработки_`,
@@ -133,34 +135,18 @@ export class EventConsumer {
             `_Topic Engine скорректирует приоритет ниши_`,
         };
 
+      // ── Hook Tester ─────────────────────────────────────────────────
       case 'hook_tester.winner_selected':
         return {
           text:
-            `🏆 *Победитель A/B теста определён!*\n\n` +
+            `🏆 *Победитель A/B теста хуков!*\n\n` +
             `🎣 Хук: "${payload.winnerHook ?? 'N/A'}"\n` +
             `🧠 Тип: *${payload.winnerType ?? 'N/A'}*\n` +
             `📈 Retention: *${payload.retention8s ?? 0}%*\n\n` +
             `_Добавлен в Template Library_`,
         };
 
-      case 'localization.completed':
-        return {
-          text:
-            `✅ *Локализация готова!*\n\n` +
-            `🌍 Язык: *${payload.targetLanguage ?? 'N/A'}*\n` +
-            `📦 Тип: ${payload.localizationType ?? 'N/A'}\n` +
-            `🆔 Задача: \`${payload.taskId ?? 'N/A'}\``,
-        };
-
-      case 'community.topic_exported':
-        return {
-          text:
-            `💬 *Новая тема из комментариев!*\n\n` +
-            `❓ "${payload.question ?? 'N/A'}"\n` +
-            `🔁 Частота: *${payload.count ?? 1}×*\n\n` +
-            `_Добавлена в Topic Engine для генерации_`,
-        };
-
+      // ── Одобрения ─────────────────────────────────────────────────
       case 'topic.pending_approval': {
         const kb = new InlineKeyboard()
           .text('✅ Одобрить', `topic:approve:${payload.id}`)
@@ -183,12 +169,82 @@ export class EventConsumer {
         return {
           text:
             `📝 *Скрипт ждёт одобрения!*\n\n` +
-            `🎬 Тема: "${payload.topicTitle ?? 'N/A'}"\n` +
+            `🎤 Тема: "${payload.topicTitle ?? 'N/A'}"\n` +
             `⏱ Длительность: ~${payload.estimatedDuration ?? 'N/A'} мин\n` +
             `🎣 Хук: "${payload.hook ?? 'N/A'}"`,
           keyboard: kb,
         };
       }
+
+      // ── Локализация ─────────────────────────────────────────────────
+      case 'localization.completed':
+        return {
+          text:
+            `✅ *Локализация готова!*\n\n` +
+            `🌍 Язык: *${payload.targetLanguage ?? 'N/A'}*\n` +
+            `📦 Тип: ${payload.localizationType ?? 'N/A'}\n` +
+            `🆔 Задача: \`${payload.taskId ?? 'N/A'}\``,
+        };
+
+      case 'community.topic_exported':
+        return {
+          text:
+            `💬 *Новая тема из комментариев!*\n\n` +
+            `❓ "${payload.question ?? 'N/A'}"\n` +
+            `🔁 Частота: *${payload.count ?? 1}×*\n\n` +
+            `_Добавлена в Topic Engine_`,
+        };
+
+      // ── 🎨 Thumbnail ────────────────────────────────────────────────
+      case 'thumbnail.ab_test_winner': {
+        const ctrPct = payload.winnerCtr != null
+          ? (Number(payload.winnerCtr) * 100).toFixed(2) + '%'
+          : 'N/A';
+        const hookEmoji: Record<string, string> = {
+          fear: '🚨', curiosity: '🤔', surprise: '🤯',
+          desire: '✨', social_proof: '🔥',
+        };
+        const emoji = hookEmoji[payload.winnerHookType ?? ''] ?? '🎨';
+        return {
+          text:
+            `🏆 *Победитель A/B теста обложек!*\n\n` +
+            `🎥 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
+            `${emoji} Hook-тип: *${payload.winnerHookType ?? 'N/A'}*\n` +
+            `📈 CTR: *${ctrPct}*\n` +
+            `🆔 Тест: \`${payload.testId ?? 'N/A'}\`\n\n` +
+            `_Обложка выбрана! Admin UI → /thumbnails_`,
+        };
+      }
+
+      case 'thumbnail.ab_test_created':
+        return {
+          text:
+            `🔬 *A/B тест обложек запущен!*\n\n` +
+            `🎥 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
+            `🎨 Вариантов: *${payload.variantCount ?? 3}*\n\n` +
+            `_Генерация в процессе..._`,
+        };
+
+      case 'thumbnail.generated':
+        // Уведомляем только если есть реальные затраты (не free-провайдеры)
+        if (!payload.costUsd || Number(payload.costUsd) === 0) return null;
+        return {
+          text:
+            `🎨 *Обложка сгенерирована*\n\n` +
+            `📹 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
+            `🤖 Модель: \`${payload.model ?? 'N/A'}\`\n` +
+            `💰 Стоимость: $${payload.costUsd}\n` +
+            `⏱ Время: ${payload.durationMs ?? 0}ms`,
+        };
+
+      case 'thumbnail.failed':
+        return {
+          text:
+            `❌ *Ошибка генерации обложки!*\n\n` +
+            `📹 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
+            `🔧 Провайдер: ${payload.provider ?? 'N/A'}\n` +
+            `💬 Ошибка: ${(payload.errorMessage ?? 'Unknown').slice(0, 100)}`,
+        };
 
       default:
         return null;
@@ -198,7 +254,6 @@ export class EventConsumer {
   private async handleEvent(entry: EventEntry) {
     const msg = this.buildMessage(entry);
     if (!msg) return;
-
     for (const chatId of this.chatIds) {
       try {
         await this.bot.api.sendMessage(chatId, msg.text, {
