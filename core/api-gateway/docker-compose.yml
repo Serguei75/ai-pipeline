@@ -1,0 +1,30 @@
+version: '3.8'
+
+# API Gateway — no database needed, just a reverse proxy
+# All upstream services must be running before starting the gateway.
+# For local dev: services run on host (localhost:3001..3007)
+# For Docker: use host.docker.internal or a shared Docker network
+
+services:
+  api-gateway:
+    build: .
+    ports:
+      - '3100:3100'
+    environment:
+      PORT: 3100
+      NODE_ENV: production
+      # Update these to your actual service URLs when running in Docker
+      TOPIC_ENGINE_URL: ${TOPIC_ENGINE_URL:-http://host.docker.internal:3001}
+      SCRIPT_ENGINE_URL: ${SCRIPT_ENGINE_URL:-http://host.docker.internal:3002}
+      VOICE_ENGINE_URL: ${VOICE_ENGINE_URL:-http://host.docker.internal:3003}
+      MEDIA_ENGINE_URL: ${MEDIA_ENGINE_URL:-http://host.docker.internal:3004}
+      ANALYTICS_ENGINE_URL: ${ANALYTICS_ENGINE_URL:-http://host.docker.internal:3005}
+      COMMUNITY_ENGINE_URL: ${COMMUNITY_ENGINE_URL:-http://host.docker.internal:3006}
+      LOCALIZATION_ENGINE_URL: ${LOCALIZATION_ENGINE_URL:-http://host.docker.internal:3007}
+      HEALTH_TIMEOUT_MS: 3000
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
