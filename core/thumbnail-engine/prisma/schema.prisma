@@ -27,6 +27,12 @@ enum AspectRatio {
   SQUARE_1_1
 }
 
+enum ABTestStatus {
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
 model ThumbnailJob {
   id             String            @id @default(cuid())
   videoId        String?
@@ -69,4 +75,42 @@ model ThumbnailCostLog {
   job ThumbnailJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@map("thumbnail_cost_logs")
+}
+
+// ─── A/B Тестирование обложек ────────────────────────────────────────────
+
+model ThumbnailABTest {
+  id          String       @id @default(cuid())
+  videoId     String
+  status      ABTestStatus @default(RUNNING)
+  winnerId    String?      // variantId-победитель
+  winnerCtr   Float?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  variants ThumbnailABVariant[]
+
+  @@index([videoId])
+  @@index([status])
+  @@map("thumbnail_ab_tests")
+}
+
+model ThumbnailABVariant {
+  id          String            @id @default(cuid())
+  testId      String
+  prompt      String            @db.VarChar(2000)
+  hookType    String            // fear | curiosity | surprise | desire | social_proof
+  provider    ThumbnailProvider @default(HUGGINGFACE)
+  imageUrl    String?
+  localPath   String?
+  impressions Int               @default(0)
+  clicks      Int               @default(0)
+  ctr         Float?            // clicks / impressions
+  isWinner    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+
+  test ThumbnailABTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@index([testId])
+  @@map("thumbnail_ab_variants")
 }

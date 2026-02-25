@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import path from 'path';
 import { generateRoutes } from './routes/generate';
 import { healthRoutes } from './routes/health';
+import { abTestRoutes } from './routes/ab-test';
 import { ensureStorageDir } from './services/storage';
 import { disconnectPrisma } from './services/prisma';
 
@@ -27,13 +28,16 @@ async function start(): Promise<void> {
 
   await app.register(generateRoutes);
   await app.register(healthRoutes);
+  await app.register(abTestRoutes);   // ←── A/B Tester
 
   const port = parseInt(process.env.PORT || '3009');
   await app.listen({ port, host: '0.0.0.0' });
+
   console.log(`\n🎨 Thumbnail Engine  →  http://localhost:${port}`);
-  console.log(`   Provider: ${(process.env.THUMBNAIL_DEFAULT_PROVIDER || 'MOCK').toUpperCase()}`);
-  console.log(`   POST /thumbnails/generate`);
-  console.log(`   GET  /thumbnails`);
+  console.log(`   POST /thumbnails/generate     — генерация обложки`);
+  console.log(`   POST /thumbnails/ab-test      — A/B тест 3 вариантов`);
+  console.log(`   GET  /thumbnails/ab-tests     — список тестов`);
+  console.log(`   POST /thumbnails/ab-tests/:id/winner — выбрать победителя`);
   console.log(`   GET  /health\n`);
 }
 
