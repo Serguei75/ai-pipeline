@@ -1,85 +1,78 @@
 'use client'
-
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Lightbulb, FileText, Mic2, Film, BarChart3, Zap } from 'lucide-react'
-import { useLanguage, type Locale } from '@/contexts/language'
-
-const NAV_KEYS = [
-  { href: '/',          key: 'nav.dashboard', icon: LayoutDashboard },
-  { href: '/topics',    key: 'nav.topics',    icon: Lightbulb },
-  { href: '/scripts',   key: 'nav.scripts',   icon: FileText },
-  { href: '/voice',     key: 'nav.voice',     icon: Mic2 },
-  { href: '/media',     key: 'nav.media',     icon: Film },
-  { href: '/analytics', key: 'nav.analytics', icon: BarChart3 },
-]
+import {
+  LayoutDashboard, Lightbulb, FileText, Mic2,
+  Film, BarChart3, MessageCircle, Globe, ChevronRight,
+} from 'lucide-react'
+import { useI18n } from './i18n-provider'
+import { LOCALES } from '@/lib/i18n'
 
 export function Sidebar() {
   const pathname = usePathname()
-  const { locale, setLocale, t } = useLanguage()
+  const { t, locale, setLocale } = useI18n()
+
+  const NAV = [
+    { href: '/',             label: t.sidebar.dashboard,    icon: LayoutDashboard },
+    { href: '/topics',       label: t.sidebar.topics,       icon: Lightbulb },
+    { href: '/scripts',      label: t.sidebar.scripts,      icon: FileText },
+    { href: '/voice',        label: t.sidebar.voice,        icon: Mic2 },
+    { href: '/media',        label: t.sidebar.media,        icon: Film },
+    { href: '/analytics',    label: t.sidebar.analytics,    icon: BarChart3 },
+    { href: '/community',    label: t.sidebar.community,    icon: MessageCircle },
+    { href: '/localization', label: t.sidebar.localization, icon: Globe },
+  ]
 
   return (
     <aside className="w-56 min-h-screen bg-[#111] border-r border-[#1f1f1f] flex flex-col shrink-0">
-      {/* Logo */}
-      <div className="h-14 flex items-center gap-2.5 px-4 border-b border-[#1f1f1f]">
-        <div className="w-7 h-7 bg-gradient-to-br from-violet-500 to-blue-500 rounded-lg flex items-center justify-center shrink-0">
-          <Zap className="w-3.5 h-3.5 text-white" />
-        </div>
+      {/* Logo + Language switcher */}
+      <div className="h-14 flex items-center justify-between px-4 border-b border-[#1f1f1f]">
         <div>
           <p className="text-sm font-semibold leading-none">AI Pipeline</p>
-          <p className="text-[10px] text-neutral-500 mt-0.5">Control Center</p>
+          <p className="text-[10px] text-neutral-500 mt-0.5">
+            {locale === 'ru' ? 'Панель управления' : 'Control Center'}
+          </p>
         </div>
+        <select
+          value={locale}
+          onChange={(e) => setLocale(e.target.value as 'en' | 'ru')}
+          className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-md text-[10px] px-1.5 py-1 cursor-pointer text-neutral-300 hover:border-[#3a3a3a] transition-colors"
+        >
+          {LOCALES.map((l) => (
+            <option key={l.code} value={l.code}>{l.label}</option>
+          ))}
+        </select>
       </div>
 
-      {/* Nav items */}
+      {/* Navigation */}
       <nav className="flex-1 p-2 space-y-0.5">
-        {NAV_KEYS.map(({ href, key, icon: Icon }) => {
+        {NAV.map(({ href, label, icon: Icon }) => {
           const active = href === '/' ? pathname === '/' : pathname.startsWith(href)
           return (
             <Link
               key={href}
               href={href}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
                 active
-                  ? 'bg-violet-600/15 text-violet-400 font-medium'
-                  : 'text-neutral-500 hover:text-neutral-200 hover:bg-white/5'
+                  ? 'bg-[#1f1f1f] text-white'
+                  : 'text-neutral-400 hover:text-white hover:bg-[#1a1a1a]'
               }`}
             >
               <Icon className="w-4 h-4 shrink-0" />
-              {t(key)}
+              <span className="flex-1">{label}</span>
+              {active && <ChevronRight className="w-3 h-3 text-neutral-600" />}
             </Link>
           )
         })}
       </nav>
 
-      {/* Language toggle + Footer */}
-      <div className="p-3 border-t border-[#1f1f1f] space-y-3">
-        {/* Language switcher */}
-        <div className="flex bg-[#1a1a1a] rounded-lg p-0.5">
-          {(['en', 'ru'] as Locale[]).map((l) => (
-            <button
-              key={l}
-              onClick={() => setLocale(l)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                locale === l
-                  ? 'bg-violet-600 text-white'
-                  : 'text-neutral-500 hover:text-neutral-300'
-              }`}
-            >
-              <span>{l === 'en' ? '🇬🇧' : '🇷🇺'}</span>
-              <span>{l === 'en' ? 'EN' : 'РУ'}</span>
-            </button>
-          ))}
+      {/* Footer */}
+      <div className="p-4 border-t border-[#1f1f1f]">
+        <div className="flex items-center gap-1.5">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <p className="text-xs text-neutral-600">{t.sidebar.footerModules}</p>
         </div>
-
-        {/* Build info */}
-        <div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <p className="text-xs text-neutral-600">{t('nav.modules_built')}</p>
-          </div>
-          <p className="text-[10px] text-neutral-700 mt-0.5">{t('nav.version')}</p>
-        </div>
+        <p className="text-[10px] text-neutral-700 mt-0.5">{t.sidebar.footerVersion}</p>
       </div>
     </aside>
   )
