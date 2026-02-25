@@ -1,53 +1,57 @@
-# Установка зависимостей — voice-engine (Provider Pattern)
+# voice-engine — Provider Stack (v2, no subscriptions)
 
-## Архитектура провайдеров
+## Стек провайдеров (все pay-per-use или free)
 
 ```
 TtsRouter
-├── KokoroProvider   (HF Kokoro-82M)    — FREE, dev/CI
-├── PollyProvider    (Amazon Polly)     — $4-16/1M chars, prod standard
-└── ResembleProvider (Resemble AI)     — $5-19/мес, клон голоса
+├── KokoroProvider         HF Kokoro-82M    — FREE, dev/CI
+├── GoogleCloudTtsProvider Google TTS       — 1M симв/мес бесплатно вечно, затем $16/1M
+├── FishAudioProvider      Fish Audio       — $15/1M байт, pay-per-use + клонирование
+└── PollyProvider          Amazon Polly     — $4/1M (фоллбэк при >1M симв/мес)
 ```
 
-## Зависимости по провайдеру
+## Новые npm-пакеты
 
-### Только Amazon Polly требует npm-пакет (AWS SDK v3):
+**Ни одного!** Google TTS и Fish Audio используют нативный `fetch` (Node.js 18+).
 
+Polly (AWS SDK) установлен ранее и остаётся как fallback:
 ```bash
-cd core/voice-engine
+# Только если ещё не установлен:
 npm install @aws-sdk/client-polly@^3.758.0
 ```
-
-### Kokoro и Resemble — только нативный `fetch` (Node.js 18+), без пакетов.
-
----
 
 ## Переменные окружения `.env`
 
 ```env
 # ──────────────────────────────────────────────────
-# KokoroProvider (HuggingFace Kokoro-82M, FREE)
+# Kokoro (HuggingFace Inference API, FREE)
 # ──────────────────────────────────────────────────
-HF_API_TOKEN=hf_xxxxxxxxxxxx                  # opional, если нужен больший rate limit
-KOKORO_MODEL=hexgrad/Kokoro-82M               # модель по умолчанию
+HF_API_TOKEN=hf_xxxx          # Optional, for higher rate limits
+KOKORO_MODEL=hexgrad/Kokoro-82M
 
 # ──────────────────────────────────────────────────
-# PollyProvider (Amazon Polly, ~$2-5/мес prod)
-# Регистрация: https://aws.amazon.com/polly/
+# Google Cloud TTS (1M симв/мес FREE, затем pay-per-use)
+# Регистрация: console.cloud.google.com → APIs → Cloud Text-to-Speech API
+# ──────────────────────────────────────────────────
+GOOGLE_TTS_API_KEY=AIzaSy...               # Проще: GCP Console → APIs → Credentials
+GOOGLE_TTS_DEFAULT_VOICE_ID=en-US-Neural2-F
+# Или ADC (Cloud Run / GCE): установить GOOGLE_APPLICATION_CREDENTIALS=path/to/key.json
+
+# ──────────────────────────────────────────────────
+# Fish Audio (pay-per-use, $15/1M bytes, клон голоса)
+# Регистрация: fish.audio → Settings → API Keys
+# ──────────────────────────────────────────────────
+FISH_AUDIO_API_KEY=xxxxxxxxxxxx
+FISH_AUDIO_DEFAULT_MODEL_ID=            # UUID модели голоса (по 0 можно оставить пустым)
+
+# ──────────────────────────────────────────────────
+# Amazon Polly (fallback >1M chars, pay-per-use)
 # ──────────────────────────────────────────────────
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=AKIAxxxxxxxxxx
-AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxx
-POLLY_ENGINE=neural                           # 'neural' ($16/1M) | 'standard' ($4/1M)
-POLLY_DEFAULT_VOICE_ID=Joanna                 # Joanna, Matthew, Amy, Brian, Aria...
-
-# ──────────────────────────────────────────────────
-# ResembleProvider (Resemble AI, клон голоса)
-# Регистрация: https://app.resemble.ai
-# ──────────────────────────────────────────────────
-RESEMBLE_API_TOKEN=xxxxxxxxxxxxxxxxx           # Settings → API Key
-RESEMBLE_PROJECT_UUID=xxxxxxxx-xxxx-xxxx-xxxx  # ваш project UUID
-RESEMBLE_DEFAULT_VOICE_UUID=xxxxxxxx-xxxx       # UUID голоса по умолчанию
+AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxx
+POLLY_ENGINE=standard                   # 'standard'=$4/1M | 'neural'=$16/1M
+POLLY_DEFAULT_VOICE_ID=Joanna
 
 # ──────────────────────────────────────────────────
 # Общие
@@ -56,41 +60,30 @@ AUDIO_OUTPUT_DIR=./output/audio
 PUBLIC_BASE_URL=https://your-domain.com
 ```
 
----
+## Маршрутизация TtsRouter (v2)
 
-## Маршрутизация TtsRouter
+| `mode` | `clone` | `quality` | Провайдер | Стоимость 320k/мес |
+|---|---|---|---|---|
+| `dev` | — | — | Kokoro | **$0** |
+| — | — | `free` | Kokoro | **$0** |
+| `prod` | — | — | Google TTS | **$0** (под free tier) |
+| — | `true` | — | Fish Audio | **$4.80** (разово) |
+| — | — | `economy` | Polly std | **$1.28** |
 
-| `mode` | `clone` | `quality` | Провайдер | Стоимость |
-|--------|---------|-----------|----------|----------|
-| `dev` | — | — | Kokoro | $0 |
-| — | — | `free` | Kokoro | $0 |
-| `prod` | — | — | Polly | ~$2-5/мес |
-| — | — | `economy` | Polly | ~$2-5/мес |
-| — | `true` | — | Resemble | $5-19/мес |
-| `clone` | — | — | Resemble | $5-19/мес |
-
-## Калькулятор стоимости (320k символов/мес)
+## Калькулятор (320k симв/мес — 10 видео неделью)
 
 ```
-Kokoro  (dev):   320 000 симв × $0     = $0.00/мес
-Polly   (neural):320 000 симв × $0.016 = $5.12/мес
-Polly   (std):   320 000 симв × $0.004 = $1.28/мес
-Resemble Starter:                         = $5.00/мес (фикс)
-Resemble Creator:                         = $19.00/мес (фикс)
+Сценарий A (без клонирования):
+  Dev:  Kokoro      —  $0.00
+  Prod: Google TTS  —  $0.00  (под 1M free tier)
+  TOTAL: $0.00 / мес
 
-Оптимально (стандарт + клон):
-  Polly std  $1.28 + Resemble Starter $5 = $6.28/мес (всесто $99 ElevenLabs)
-```
+Сценарий B (с клонированием бренд голоса):
+  Dev:   Kokoro     —  $0.00
+  Prod:  Google TTS —  $0.00
+  Clone: Fish Audio —  ~$4.80  (разово за продакшн видео)
+  TOTAL: $4.80 / мес
 
-## NanoBot — примеры вызовов
-
-```
-# Тест хука (бесплатно)
-generate_voiceover(script, mode="dev")
-
-# Прод видео (дешево)
-generate_voiceover(script, mode="prod", quality="economy")
-
-# Бренд-голос клиента
-generate_voiceover(script, clone=true, voiceId="<resemble_voice_uuid>")
+Раньше (ElevenLabs Pro): $99/мес
+Економия:            95%
 ```
