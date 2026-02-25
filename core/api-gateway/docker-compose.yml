@@ -1,30 +1,41 @@
 version: '3.8'
 
-# API Gateway — no database needed, just a reverse proxy
-# All upstream services must be running before starting the gateway.
-# For local dev: services run on host (localhost:3001..3007)
-# For Docker: use host.docker.internal or a shared Docker network
+# API Gateway — reverse proxy, нет БД, простейший сервис
+# Все upstream-сервисы должны быть запущены до запуска гейтвея
 
 services:
   api-gateway:
     build: .
+    container_name: ai-pipeline-api-gateway
+    restart: unless-stopped
     ports:
       - '3100:3100'
     environment:
       PORT: 3100
       NODE_ENV: production
-      # Update these to your actual service URLs when running in Docker
-      TOPIC_ENGINE_URL: ${TOPIC_ENGINE_URL:-http://host.docker.internal:3001}
-      SCRIPT_ENGINE_URL: ${SCRIPT_ENGINE_URL:-http://host.docker.internal:3002}
-      VOICE_ENGINE_URL: ${VOICE_ENGINE_URL:-http://host.docker.internal:3003}
-      MEDIA_ENGINE_URL: ${MEDIA_ENGINE_URL:-http://host.docker.internal:3004}
-      ANALYTICS_ENGINE_URL: ${ANALYTICS_ENGINE_URL:-http://host.docker.internal:3005}
-      COMMUNITY_ENGINE_URL: ${COMMUNITY_ENGINE_URL:-http://host.docker.internal:3006}
-      LOCALIZATION_ENGINE_URL: ${LOCALIZATION_ENGINE_URL:-http://host.docker.internal:3007}
+      # Контент-модули
+      TOPIC_ENGINE_URL:       ${TOPIC_ENGINE_URL:-http://topic-engine:3001}
+      SCRIPT_ENGINE_URL:      ${SCRIPT_ENGINE_URL:-http://script-engine:3002}
+      VOICE_ENGINE_URL:       ${VOICE_ENGINE_URL:-http://voice-engine:3003}
+      MEDIA_ENGINE_URL:       ${MEDIA_ENGINE_URL:-http://media-engine:3004}
+      ANALYTICS_ENGINE_URL:   ${ANALYTICS_ENGINE_URL:-http://analytics-engine:3005}
+      COMMUNITY_ENGINE_URL:   ${COMMUNITY_ENGINE_URL:-http://community-engine:3006}
+      LOCALIZATION_ENGINE_URL: ${LOCALIZATION_ENGINE_URL:-http://localization-engine:3007}
+      # Оптимизация и аналитика
+      HOOK_TESTER_URL:        ${HOOK_TESTER_URL:-http://hook-tester:3008}
+      THUMBNAIL_ENGINE_URL:   ${THUMBNAIL_ENGINE_URL:-http://thumbnail-engine:3009}
+      COST_TRACKER_URL:       ${COST_TRACKER_URL:-http://cost-tracker:3010}
+      # Misc
       HEALTH_TIMEOUT_MS: 3000
-    restart: unless-stopped
+    networks:
+      - ai-pipeline-network
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
+
+networks:
+  ai-pipeline-network:
+    external: true
+    name: ai-pipeline-network

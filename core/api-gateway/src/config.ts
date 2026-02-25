@@ -6,6 +6,7 @@ export interface ServiceConfig {
 }
 
 export const SERVICES: Record<string, ServiceConfig> = {
+  // ── Контент
   topics: {
     name: 'topic-engine',
     url: process.env.TOPIC_ENGINE_URL || 'http://localhost:3001',
@@ -47,5 +48,24 @@ export const SERVICES: Record<string, ServiceConfig> = {
     url: process.env.LOCALIZATION_ENGINE_URL || 'http://localhost:3007',
     description: 'Subtitles + AI dubbing, multi-audio packages',
     port: 3007,
+  },
+  // ── Оптимизация и аналитика
+  hooks: {
+    name: 'hook-tester',
+    url: process.env.HOOK_TESTER_URL || 'http://localhost:3008',
+    description: 'A/B hook testing: Fear / Curiosity / Surprise variants, Template Library',
+    port: 3008,
+  },
+  thumbnails: {
+    name: 'thumbnail-engine',
+    url: process.env.THUMBNAIL_ENGINE_URL || 'http://localhost:3009',
+    description: 'AI thumbnail generation: HuggingFace FLUX, FAL.AI, Cloudflare Workers AI',
+    port: 3009,
+  },
+  costs: {
+    name: 'cost-tracker',
+    url: process.env.COST_TRACKER_URL || 'http://localhost:3010',
+    description: 'Global API cost aggregation: OpenAI, ElevenLabs, FAL, HuggingFace. ROI per video.',
+    port: 3010,
   },
 }
