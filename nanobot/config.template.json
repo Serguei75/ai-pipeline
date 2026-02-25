@@ -1,0 +1,119 @@
+{
+  "_comment": "Шаблон конфигурации NanoBot для ai-pipeline. Скопируйте в ~/.nanobot/config.json и заполните секреты.",
+
+  "providers": {
+    "openrouter": {
+      "apiKey": "REPLACE_WITH_OPENROUTER_API_KEY"
+    },
+    "anthropic": {
+      "apiKey": "REPLACE_WITH_ANTHROPIC_API_KEY"
+    },
+    "groq": {
+      "_comment": "Бесплатная транскрипция голосовых сообщений Telegram через Whisper",
+      "apiKey": "REPLACE_WITH_GROQ_API_KEY"
+    }
+  },
+
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-5",
+      "_alternatives": [
+        "anthropic/claude-sonnet-4-5",
+        "openai/gpt-4.1",
+        "deepseek/deepseek-r1"
+      ]
+    }
+  },
+
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "REPLACE_WITH_TELEGRAM_BOT_TOKEN",
+      "allowFrom": ["REPLACE_WITH_YOUR_TELEGRAM_USER_ID"]
+    },
+    "discord": {
+      "enabled": false,
+      "token": "REPLACE_WITH_DISCORD_BOT_TOKEN",
+      "allowFrom": []
+    },
+    "slack": {
+      "enabled": false,
+      "botToken": "REPLACE_WITH_SLACK_BOT_TOKEN",
+      "appToken": "REPLACE_WITH_SLACK_APP_TOKEN",
+      "groupPolicy": "mention"
+    },
+    "email": {
+      "enabled": false,
+      "consentGranted": true,
+      "imapHost": "imap.gmail.com",
+      "imapPort": 993,
+      "imapUsername": "REPLACE_WITH_EMAIL",
+      "imapPassword": "REPLACE_WITH_APP_PASSWORD",
+      "smtpHost": "smtp.gmail.com",
+      "smtpPort": 587,
+      "smtpUsername": "REPLACE_WITH_EMAIL",
+      "smtpPassword": "REPLACE_WITH_APP_PASSWORD",
+      "fromAddress": "REPLACE_WITH_EMAIL",
+      "allowFrom": ["REPLACE_WITH_OWNER_EMAIL"]
+    }
+  },
+
+  "tools": {
+    "restrictToWorkspace": false,
+    "mcpServers": {
+      "_comment": "Все сервисы pipeline подключаются как MCP серверы",
+
+      "topic-engine": {
+        "url": "http://topic-engine:3001/mcp/",
+        "_tools": ["search_trending", "get_trends", "get_topic_details"]
+      },
+
+      "script-engine": {
+        "url": "http://script-engine:3002/mcp/",
+        "_tools": ["generate_script", "improve_hook", "generate_title", "generate_description"]
+      },
+
+      "voice-engine": {
+        "url": "http://voice-engine:3003/mcp/",
+        "_tools": ["generate_voiceover", "list_voices", "get_voice_status"]
+      },
+
+      "media-engine": {
+        "url": "http://media-engine:3004/mcp/",
+        "toolTimeout": 300,
+        "_tools": ["compose_video", "add_broll", "create_thumbnail", "get_render_status"]
+      },
+
+      "competitor-intel": {
+        "url": "http://competitor-intel:3005/mcp/",
+        "toolTimeout": 120,
+        "_tools": [
+          "deconstruct_competitor_video",
+          "transcribe_youtube_video",
+          "benchmark_hooks",
+          "get_competitor_analysis"
+        ]
+      },
+
+      "analytics-engine": {
+        "url": "http://analytics-engine:3006/mcp/",
+        "_tools": ["get_channel_stats", "get_video_stats", "get_retention_curve", "get_top_videos"]
+      },
+
+      "hook-tester": {
+        "url": "http://hook-tester:3007/mcp/",
+        "_tools": ["test_hook", "benchmark_against_competitors", "get_hook_score"]
+      },
+
+      "seo-optimizer": {
+        "url": "http://seo-optimizer:3008/mcp/",
+        "_tools": ["optimize_title", "get_keywords", "generate_tags", "analyze_competition"]
+      },
+
+      "scheduler": {
+        "url": "http://scheduler:3009/mcp/",
+        "_tools": ["schedule_video", "get_queue", "get_optimal_time", "cancel_scheduled"]
+      }
+    }
+  }
+}
