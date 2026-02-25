@@ -1,0 +1,35 @@
+version: '3.8'
+services:
+  postgres-hook-tester:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: hook_tester
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - '5439:5432'
+    volumes:
+      - hook_tester_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hook-tester:
+    build: .
+    ports:
+      - '3008:3008'
+    environment:
+      PORT: 3008
+      DATABASE_URL: postgresql://postgres:password@postgres-hook-tester:5432/hook_tester
+      NODE_ENV: production
+    env_file:
+      - .env
+    depends_on:
+      postgres-hook-tester:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hook_tester_pg:

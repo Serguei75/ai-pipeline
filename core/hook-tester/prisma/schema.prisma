@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChannelType {
+  FUEL
+  INTELLECTUAL
+}
+
+// 5 psychological triggers proven in direct-response copywriting
+enum HookTrigger {
+  FEAR         // "You're making a $10k mistake..."
+  CURIOSITY    // "Nobody talks about this loophole..."
+  SURPRISE     // "I can't believe this actually worked..."
+  DESIRE       // "Here's how I earn $X in 30 days..."
+  SOCIAL_PROOF // "The top 1% all do this one thing..."
+}
+
+enum TestStatus {
+  GENERATING   // variants being created by AI
+  RUNNING      // waiting for analytics data
+  CONCLUDED    // winner determined
+  CANCELLED
+}
+
+model HookTest {
+  id          String     @id @default(uuid())
+  scriptId    String     @unique
+  topicTitle  String
+  channelType ChannelType
+  niche       String     @default("general")
+
+  variants    HookVariant[]
+  winnerId    String?    // ID of winning HookVariant
+
+  status      TestStatus @default(GENERATING)
+  startedAt   DateTime   @default(now())
+  concludedAt DateTime?
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([status])
+  @@index([channelType])
+}
+
+model HookVariant {
+  id          String      @id @default(uuid())
+  testId      String
+  test        HookTest    @relation(fields: [testId], references: [id])
+
+  trigger     HookTrigger
+  hookText    String      @db.Text
+
+  // YouTube video published with this hook
+  youtubeVideoId String?
+
+  // Performance (populated from Analytics Engine)
+  retention8s  Float?     // 0-100 (%)
+  retention60s Float?
+  ctr          Float?     // click-through rate (%)
+  viewCount    Int?
+  avgWatchSec  Float?
+
+  // Score: weighted formula
+  performanceScore Float?  // computed when data arrives
+  isWinner         Boolean @default(false)
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([testId])
+  @@index([trigger])
+}
+
+// Best performing hooks per trigger + channel type = template library
+model HookTemplate {
+  id          String      @id @default(uuid())
+  trigger     HookTrigger
+  channelType ChannelType
+  niche       String
+
+  hookText    String      @db.Text
+  sourceTestId String     // which test this came from
+  retention8s Float       // proven performance
+  performanceScore Float
+
+  timesUsed   Int         @default(0)
+  isActive    Boolean     @default(true)
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([trigger, channelType, niche])
+  @@index([performanceScore(sort: Desc)])
+}

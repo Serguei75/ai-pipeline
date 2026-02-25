@@ -1,0 +1,29 @@
+{
+  "name": "@ai-pipeline/hook-tester",
+  "version": "1.0.0",
+  "description": "A/B test 3 hook variants per script. Tracks retention_8s via analytics. Promotes winner to template library.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "lint": "eslint src --ext .ts",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@prisma/client": "^5.8.0",
+    "fastify": "^4.26.1",
+    "openai": "^4.28.0",
+    "dotenv": "^16.4.1",
+    "pino": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "prisma": "^5.8.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
