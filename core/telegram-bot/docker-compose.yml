@@ -1,0 +1,23 @@
+version: '3.9'
+
+services:
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-pipeline-telegram-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - ALLOWED_CHAT_IDS=${ALLOWED_CHAT_IDS}
+      - API_GATEWAY_URL=${API_GATEWAY_URL:-http://localhost:3100}
+      - REDIS_HOST=${REDIS_HOST:-localhost}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - NODE_ENV=production
+    networks:
+      - ai-pipeline-network
+
+networks:
+  ai-pipeline-network:
+    external: true
+    name: ai-pipeline-network
