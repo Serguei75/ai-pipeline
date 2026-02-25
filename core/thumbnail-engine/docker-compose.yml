@@ -1,0 +1,63 @@
+version: '3.9'
+
+services:
+  thumbnail-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-pipeline-thumbnail-engine
+    restart: unless-stopped
+    ports:
+      - "3009:3009"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@thumbnail-db:5432/thumbnail_engine
+      - THUMBNAIL_DEFAULT_PROVIDER=${THUMBNAIL_DEFAULT_PROVIDER:-HUGGINGFACE}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - HUGGINGFACE_MODEL=${HUGGINGFACE_MODEL:-black-forest-labs/FLUX.1-schnell}
+      - FAL_API_KEY=${FAL_API_KEY}
+      - FAL_MODEL=${FAL_MODEL:-fal-ai/flux/schnell}
+      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+      - CLOUDFLARE_MODEL=${CLOUDFLARE_MODEL:-@cf/black-forest-labs/flux-1-schnell}
+      - STORAGE_PATH=/app/storage/thumbnails
+      - STORAGE_BASE_URL=${STORAGE_BASE_URL:-http://localhost:3009/static}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - PORT=3009
+      - NODE_ENV=production
+    volumes:
+      - thumbnail-storage:/app/storage/thumbnails
+    depends_on:
+      thumbnail-db:
+        condition: service_healthy
+    networks:
+      - ai-pipeline-network
+
+  thumbnail-db:
+    image: postgres:16-alpine
+    container_name: ai-pipeline-thumbnail-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=thumbnail_engine
+    ports:
+      - "5439:5432"
+    volumes:
+      - thumbnail-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-pipeline-network
+
+volumes:
+  thumbnail-db-data:
+  thumbnail-storage:
+
+networks:
+  ai-pipeline-network:
+    external: true
+    name: ai-pipeline-network

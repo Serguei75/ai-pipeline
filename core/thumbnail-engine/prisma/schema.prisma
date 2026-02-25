@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ThumbnailStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum ThumbnailProvider {
+  HUGGINGFACE
+  FAL
+  CLOUDFLARE
+  MOCK
+}
+
+enum AspectRatio {
+  LANDSCAPE_16_9
+  PORTRAIT_9_16
+  SQUARE_1_1
+}
+
+model ThumbnailJob {
+  id             String            @id @default(cuid())
+  videoId        String?
+  prompt         String            @db.VarChar(2000)
+  negativePrompt String?           @db.VarChar(1000)
+  status         ThumbnailStatus   @default(PENDING)
+  provider       ThumbnailProvider @default(HUGGINGFACE)
+  model          String            @db.VarChar(200)
+  aspectRatio    AspectRatio       @default(LANDSCAPE_16_9)
+  width          Int               @default(1280)
+  height         Int               @default(720)
+  costUsd        Decimal?          @db.Decimal(10, 6)
+  imageUrl       String?
+  localPath      String?
+  errorMessage   String?
+  metadata       Json?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  costs ThumbnailCostLog[]
+
+  @@index([videoId])
+  @@index([status])
+  @@index([provider])
+  @@index([createdAt])
+  @@map("thumbnail_jobs")
+}
+
+model ThumbnailCostLog {
+  id           String   @id @default(cuid())
+  jobId        String
+  provider     String
+  model        String
+  steps        Int?
+  creditsUsed  Decimal? @db.Decimal(10, 6)
+  costUsd      Decimal  @db.Decimal(10, 6)
+  responseMs   Int?
+  createdAt    DateTime @default(now())
+
+  job ThumbnailJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("thumbnail_cost_logs")
+}
