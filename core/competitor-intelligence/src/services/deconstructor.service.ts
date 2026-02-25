@@ -6,12 +6,40 @@
  *
  * Input:  TranscriptResult (from TubescribeService)
  * Output: DeconstructedVideo — 10 marketing dimensions as structured JSON
+ *
+ * ── Model selection (Feb 2026) ───────────────────────────────────────────────
+ * Model                  Input     Output    Use case
+ * gemini-2.5-flash-lite  $0.10/1M  $0.40/1M  ← DEFAULT: structured JSON, fast
+ * gemini-2.5-flash       $0.15/1M  $0.60/1M  balanced quality/cost
+ * gemini-2.5-pro         $1.25/1M  $10.0/1M  complex reasoning, long context
+ * gemini-3.0-flash-preview $0.50/1M $3.0/1M  preview, latest architecture
+ *
+ * Set env GEMINI_MODEL to override default.
+ * ───────────────────────────────────────────────────────────────────
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { TubescribeService, type TranscriptResult } from './tubescribe.service.js'
 
-// ─── Output types ─────────────────────────────────────────────────────────────
+// ─── Model constants (current as of Feb 2026) ──────────────────────────────────────
+
+export const GEMINI_MODELS = {
+  // ✅ Current generation — use these
+  FLASH_LITE: 'gemini-2.5-flash-lite',        // cheapest, ideal for JSON extraction
+  FLASH:      'gemini-2.5-flash',             // balanced, good for complex analysis
+  PRO:        'gemini-2.5-pro',               // most capable, expensive
+  FLASH_3_PREVIEW: 'gemini-3.0-flash-preview',// bleeding edge, higher cost
+
+  // ❌ Deprecated — DO NOT USE
+  // 'gemini-1.5-flash' — deprecated
+  // 'gemini-2.0-flash' — expired Feb 2026
+} as const
+
+// Default: Flash-Lite is perfect for structured JSON extraction (our use case)
+const DEFAULT_MODEL      = GEMINI_MODELS.FLASH_LITE
+const DEFAULT_MODEL_DIMS = GEMINI_MODELS.FLASH  // slightly smarter for 10-dimension analysis
+
+// ─── Output types ──────────────────────────────────────────────────────────────────
 
 export interface HookElement {
   hookText: string
@@ -76,10 +104,11 @@ export interface DeconstructedVideo {
   dimensions: DeconstructedDimensions
   topHooks: RankedHook[]
   scriptTemplate: ScriptTemplate
+  modelUsed: string
   analyzedAt: string
 }
 
-// ─── Prompts ──────────────────────────────────────────────────────────────────
+// ─── Prompts ───────────────────────────────────────────────────────────────────
 
 const SUMMARY_PROMPT = (transcript: string) => `
 You are an expert video marketing analyst. Analyze this transcript and return a JSON summary.
@@ -148,21 +177,41 @@ If info is absent in transcript, use empty arrays or "Not specified".
 Return ONLY valid JSON.
 `
 
-// ─── Service ──────────────────────────────────────────────────────────────────
+// ─── Service ─────────────────────────────────────────────────────────────────
 
 export class DeconstructorService {
-  private model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  // Two models: lite for simple summary, flash for complex 10-dim analysis
+  private modelSummary:    ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  private modelDimensions: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  private readonly modelName: string
   private tubescribe = new TubescribeService()
 
   constructor(apiKey: string) {
+    if (!apiKey) throw new Error('GEMINI_API_KEY is required')
     const ai = new GoogleGenerativeAI(apiKey)
-    this.model = ai.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      generationConfig: { responseMimeType: 'application/json' },
+
+    // Allow override via env var for A/B testing or cost control
+    const modelEnv = process.env.GEMINI_MODEL
+    this.modelName = modelEnv ?? DEFAULT_MODEL
+
+    const jsonConfig = { responseMimeType: 'application/json' as const }
+
+    // Summary: lite is sufficient (small output, clear schema)
+    this.modelSummary = ai.getGenerativeModel({
+      model: modelEnv ?? DEFAULT_MODEL,
+      generationConfig: jsonConfig,
     })
+
+    // Dimensions: use flash for richer analysis (still cheap)
+    this.modelDimensions = ai.getGenerativeModel({
+      model: modelEnv ?? DEFAULT_MODEL_DIMS,
+      generationConfig: jsonConfig,
+    })
+
+    console.log(`[DeconstructorService] Models: summary=${modelEnv ?? DEFAULT_MODEL}, dims=${modelEnv ?? DEFAULT_MODEL_DIMS}`)
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
+  // ── Public API ─────────────────────────────────────────────────────────────
 
   async deconstructFromUrl(
     videoUrl: string,
@@ -184,20 +233,21 @@ export class DeconstructorService {
     onProgress?.('Done', 100)
 
     return {
-      videoId: transcript.videoId,
-      videoUrl: transcript.videoUrl,
+      videoId:       transcript.videoId,
+      videoUrl:      transcript.videoUrl,
       summary,
       dimensions,
       topHooks,
       scriptTemplate,
-      analyzedAt: new Date().toISOString(),
+      modelUsed:     this.modelName,
+      analyzedAt:    new Date().toISOString(),
     }
   }
 
-  // ── Private helpers ───────────────────────────────────────────────────────
+  // ── Private helpers ─────────────────────────────────────────────────────
 
   private async generateSummary(t: TranscriptResult): Promise<VideoSummary> {
-    const res = await this.model.generateContent(SUMMARY_PROMPT(t.fullText))
+    const res = await this.modelSummary.generateContent(SUMMARY_PROMPT(t.fullText))
     return JSON.parse(res.response.text()) as VideoSummary
   }
 
@@ -206,7 +256,7 @@ export class DeconstructorService {
     summary: VideoSummary
   ): Promise<DeconstructedDimensions> {
     const formatted = this.tubescribe.formatForAnalysis(t)
-    const res = await this.model.generateContent(DIMENSIONS_PROMPT(formatted, summary))
+    const res = await this.modelDimensions.generateContent(DIMENSIONS_PROMPT(formatted, summary))
     return JSON.parse(res.response.text()) as DeconstructedDimensions
   }
 
@@ -214,18 +264,18 @@ export class DeconstructorService {
     const order: Record<string, number> = { High: 0, Medium: 1, Low: 2 }
     const hooks: RankedHook[] = [
       ...d.spokenHooks.elements.map((h) => ({
-        text: h.hookText,
-        type: h.hookType,
+        text:          h.hookText,
+        type:          h.hookType,
         effectiveness: this.parseEff(h.effectiveness),
-        timestamp: h.timestamp,
-        source: 'spoken' as const,
+        timestamp:     h.timestamp,
+        source:        'spoken' as const,
       })),
       ...d.visualHooks.elements.map((h) => ({
-        text: h.description,
-        type: 'Visual',
+        text:          h.description,
+        type:          'Visual',
         effectiveness: this.parseEff(h.effectiveness),
-        timestamp: h.timestamp,
-        source: 'visual' as const,
+        timestamp:     h.timestamp,
+        source:        'visual' as const,
       })),
     ]
     return hooks.sort((a, b) => (order[a.effectiveness] ?? 2) - (order[b.effectiveness] ?? 2))
