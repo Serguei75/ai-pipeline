@@ -1,0 +1,17 @@
+{
+  "name": "@ai-pipeline/llm",
+  "version": "1.0.0",
+  "description": "Unified LLM Router — Gemini 2.5 Flash (1M context) as default for all pipeline tasks",
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "pino": "^8.21.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "typescript": "^5.3.3"
+  }
+}
