@@ -1,0 +1,35 @@
+{
+  "name": "@ai-pipeline/localization-engine",
+  "version": "1.0.0",
+  "description": "Two-stage localization: Stage1=subtitles+metadata, Stage2=AI dubbing multi-audio for YouTube",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "lint": "eslint src --ext .ts",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@prisma/client": "^5.8.0",
+    "fastify": "^4.26.1",
+    "openai": "^4.28.0",
+    "axios": "^1.6.7",
+    "form-data": "^4.0.0",
+    "zod": "^3.22.4",
+    "dotenv": "^16.4.1",
+    "pino": "^8.19.0",
+    "fs-extra": "^11.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "@types/fs-extra": "^11.0.4",
+    "prisma": "^5.8.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}

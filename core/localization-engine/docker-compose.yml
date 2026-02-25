@@ -1,0 +1,39 @@
+version: '3.8'
+services:
+  postgres-localization:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: localization_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - '5438:5432'
+    volumes:
+      - localization_pg_data:/var/lib/postgresql/data
+      - localization_output:/app/output
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  localization-engine:
+    build: .
+    ports:
+      - '3007:3007'
+    environment:
+      PORT: 3007
+      DATABASE_URL: postgresql://postgres:password@postgres-localization:5432/localization_engine
+      NODE_ENV: production
+    env_file:
+      - .env
+    volumes:
+      - localization_output:/app/output
+    depends_on:
+      postgres-localization:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  localization_pg_data:
+  localization_output:

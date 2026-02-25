@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LocalizationMode {
+  SUBTITLES  // Stage 1 only
+  DUBBING    // Stage 2 only
+  BOTH       // Both stages
+}
+
+enum TaskStatus {
+  PENDING
+  STAGE1_PROCESSING
+  STAGE1_DONE
+  STAGE2_PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AssetType {
+  SUBTITLES   // .srt file
+  AUDIO       // .mp3 dubbed audio
+  METADATA    // JSON {title, description, tags}
+}
+
+enum AssetStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+model LocalizationTask {
+  id               String          @id @default(uuid())
+  youtubeVideoId   String          // YouTube video ID
+  title            String          // original video title
+  sourceLang       String          @default("en")
+  targetLangs      String[]        // ["de", "es", "ja"]
+  mode             LocalizationMode @default(SUBTITLES)
+  status           TaskStatus      @default(PENDING)
+
+  // Source content (script/transcript)
+  scriptText       String?         @db.Text
+
+  // Timing hints (for subtitle generation)
+  durationSeconds  Int?            // total video duration
+
+  assets           LocalizedAsset[]
+  errorLog         String?         @db.Text
+
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([status])
+  @@index([youtubeVideoId])
+}
+
+model LocalizedAsset {
+  id                 String      @id @default(uuid())
+  taskId             String
+  task               LocalizationTask @relation(fields: [taskId], references: [id])
+
+  language           String      // "de", "es", etc.
+  assetType          AssetType
+
+  // Output
+  filePath           String?     // local path to generated file
+  fileUrl            String?     // S3/CDN URL
+  contentJson        String?     @db.Text // for METADATA type
+
+  status             AssetStatus @default(PENDING)
+  errorMessage       String?
+
+  // YouTube multi-audio upload reference
+  youtubeAudioTrackId String?
+
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@unique([taskId, language, assetType])
+  @@index([taskId])
+  @@index([status])
+}
