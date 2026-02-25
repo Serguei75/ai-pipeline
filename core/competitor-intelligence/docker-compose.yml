@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  competitor-intelligence:
+    build: .
+    container_name: competitor-intelligence
+    restart: unless-stopped
+    ports:
+      - '3011:3011'
+    environment:
+      PORT: 3011
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/competitor_intelligence}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-6}
+      VIDEOS_PER_CHANNEL: ${VIDEOS_PER_CHANNEL:-50}
+      MIN_VIEW_VELOCITY: ${MIN_VIEW_VELOCITY:-1000}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - ai-pipeline-network
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3011/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: competitor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: competitor_intelligence
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - competitor_pg_data:/var/lib/postgresql/data
+    networks:
+      - ai-pipeline-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: competitor-redis
+    restart: unless-stopped
+    networks:
+      - ai-pipeline-network
+
+volumes:
+  competitor_pg_data:
+
+networks:
+  ai-pipeline-network:
+    external: true
+    name: ai-pipeline-network

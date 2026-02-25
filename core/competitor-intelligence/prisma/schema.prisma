@@ -1,0 +1,73 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model CompetitorChannel {
+  id              String    @id @default(cuid())
+  channelId       String    @unique  // YouTube channel ID (UCxxxxxxxx)
+  channelUrl      String
+  name            String
+  description     String?   @db.Text
+  subscriberCount Int?
+  videoCount      Int?
+  niche           String?
+  isActive        Boolean   @default(true)
+  lastSyncAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  videos CompetitorVideo[]
+
+  @@index([niche])
+  @@index([isActive])
+}
+
+model CompetitorVideo {
+  id           String   @id @default(cuid())
+  channelId    String
+  videoId      String   @unique  // YouTube video ID
+  title        String
+  description  String?  @db.Text
+  thumbnailUrl String?
+  publishedAt  DateTime
+  viewCount    Int      @default(0)
+  likeCount    Int      @default(0)
+  commentCount Int      @default(0)
+  duration     String?  // ISO 8601 e.g. PT4M30S
+  tags         String[]
+  viewVelocity Float?   // views per day since publish
+  isAnalyzed   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  channel CompetitorChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  ideas   CompetitorIdea[]
+
+  @@index([channelId])
+  @@index([viewVelocity(sort: Desc)])
+  @@index([publishedAt(sort: Desc)])
+  @@index([isAnalyzed])
+}
+
+model CompetitorIdea {
+  id            String   @id @default(cuid())
+  sourceVideoId String
+  title         String
+  angle         String   @db.Text
+  hookType      String   // fear | curiosity | surprise | desire | social_proof
+  estimatedCpm  Float?
+  priority      String   @default("MEDIUM") // HIGH | MEDIUM | LOW
+  status        String   @default("PENDING")  // PENDING | EXPORTED | REJECTED
+  createdAt     DateTime @default(now())
+
+  sourceVideo CompetitorVideo @relation(fields: [sourceVideoId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt(sort: Desc)])
+}
