@@ -1,28 +1,27 @@
 {
-  "name": "cost-tracker",
+  "name": "@ai-pipeline/cost-tracker",
   "version": "1.0.0",
-  "description": "Global API cost aggregator for AI YouTube Pipeline — tracks OpenAI, ElevenLabs, FAL, HuggingFace spend",
-  "main": "dist/main.js",
+  "description": "Real-time cost tracking per video — LLM tokens + TTS chars + HeyGen minutes + thumbnails → ROI",
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
+    "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/main.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
-    "typecheck": "tsc --noEmit",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev"
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "fastify": "^4.26.0",
-    "@fastify/cors": "^9.0.1",
-    "@prisma/client": "^5.8.0",
-    "prisma": "^5.8.0",
-    "ioredis": "^5.3.2",
-    "dotenv": "^16.4.1"
+    "fastify": "^4.26.2",
+    "pino": "^8.21.0",
+    "pino-pretty": "^10.3.1",
+    "redis": "^4.6.13",
+    "zod": "^3.22.4",
+    "pg": "^8.11.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",
-    "ts-node-dev": "^2.0.0",
+    "@types/pg": "^8.11.2",
+    "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }
 }
