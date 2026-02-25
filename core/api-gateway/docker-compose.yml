@@ -1,8 +1,5 @@
 version: '3.8'
 
-# API Gateway — reverse proxy, нет БД, простейший сервис
-# Все upstream-сервисы должны быть запущены до запуска гейтвея
-
 services:
   api-gateway:
     build: .
@@ -13,18 +10,20 @@ services:
     environment:
       PORT: 3100
       NODE_ENV: production
-      # Контент-модули
-      TOPIC_ENGINE_URL:       ${TOPIC_ENGINE_URL:-http://topic-engine:3001}
-      SCRIPT_ENGINE_URL:      ${SCRIPT_ENGINE_URL:-http://script-engine:3002}
-      VOICE_ENGINE_URL:       ${VOICE_ENGINE_URL:-http://voice-engine:3003}
-      MEDIA_ENGINE_URL:       ${MEDIA_ENGINE_URL:-http://media-engine:3004}
-      ANALYTICS_ENGINE_URL:   ${ANALYTICS_ENGINE_URL:-http://analytics-engine:3005}
-      COMMUNITY_ENGINE_URL:   ${COMMUNITY_ENGINE_URL:-http://community-engine:3006}
-      LOCALIZATION_ENGINE_URL: ${LOCALIZATION_ENGINE_URL:-http://localization-engine:3007}
-      # Оптимизация и аналитика
-      HOOK_TESTER_URL:        ${HOOK_TESTER_URL:-http://hook-tester:3008}
-      THUMBNAIL_ENGINE_URL:   ${THUMBNAIL_ENGINE_URL:-http://thumbnail-engine:3009}
-      COST_TRACKER_URL:       ${COST_TRACKER_URL:-http://cost-tracker:3010}
+      # Контент
+      TOPIC_ENGINE_URL:            ${TOPIC_ENGINE_URL:-http://topic-engine:3001}
+      SCRIPT_ENGINE_URL:           ${SCRIPT_ENGINE_URL:-http://script-engine:3002}
+      VOICE_ENGINE_URL:            ${VOICE_ENGINE_URL:-http://voice-engine:3003}
+      MEDIA_ENGINE_URL:            ${MEDIA_ENGINE_URL:-http://media-engine:3004}
+      ANALYTICS_ENGINE_URL:        ${ANALYTICS_ENGINE_URL:-http://analytics-engine:3005}
+      COMMUNITY_ENGINE_URL:        ${COMMUNITY_ENGINE_URL:-http://community-engine:3006}
+      LOCALIZATION_ENGINE_URL:     ${LOCALIZATION_ENGINE_URL:-http://localization-engine:3007}
+      # Оптимизация
+      HOOK_TESTER_URL:             ${HOOK_TESTER_URL:-http://hook-tester:3008}
+      THUMBNAIL_ENGINE_URL:        ${THUMBNAIL_ENGINE_URL:-http://thumbnail-engine:3009}
+      COST_TRACKER_URL:            ${COST_TRACKER_URL:-http://cost-tracker:3010}
+      # Конкурентная разведка
+      COMPETITOR_INTELLIGENCE_URL: ${COMPETITOR_INTELLIGENCE_URL:-http://competitor-intelligence:3011}
       # Misc
       HEALTH_TIMEOUT_MS: 3000
     networks:

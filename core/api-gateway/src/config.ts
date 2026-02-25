@@ -49,11 +49,11 @@ export const SERVICES: Record<string, ServiceConfig> = {
     description: 'Subtitles + AI dubbing, multi-audio packages',
     port: 3007,
   },
-  // ── Оптимизация и аналитика
+  // ── Оптимизация
   hooks: {
     name: 'hook-tester',
     url: process.env.HOOK_TESTER_URL || 'http://localhost:3008',
-    description: 'A/B hook testing: Fear / Curiosity / Surprise variants, Template Library',
+    description: 'A/B hook testing: Fear / Curiosity / Surprise variants',
     port: 3008,
   },
   thumbnails: {
@@ -65,7 +65,14 @@ export const SERVICES: Record<string, ServiceConfig> = {
   costs: {
     name: 'cost-tracker',
     url: process.env.COST_TRACKER_URL || 'http://localhost:3010',
-    description: 'Global API cost aggregation: OpenAI, ElevenLabs, FAL, HuggingFace. ROI per video.',
+    description: 'Global API cost aggregation: OpenAI, ElevenLabs, FAL, HuggingFace',
     port: 3010,
+  },
+  // ── Конкурентная разведка
+  competitors: {
+    name: 'competitor-intelligence',
+    url: process.env.COMPETITOR_INTELLIGENCE_URL || 'http://localhost:3011',
+    description: 'YouTube competitor monitoring, AI trend analysis, topic idea generation',
+    port: 3011,
   },
 }
