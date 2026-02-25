@@ -16,7 +16,10 @@ type NotifiableEvent =
   | 'thumbnail.generated'
   | 'thumbnail.failed'
   | 'thumbnail.ab_test_created'
-  | 'thumbnail.ab_test_winner';
+  | 'thumbnail.ab_test_winner'
+  | 'competitor.trend_detected'
+  | 'competitor.ideas_bulk_generated'
+  | 'competitor.idea_exported';
 
 interface EventEntry {
   id: string;
@@ -50,9 +53,7 @@ export class EventConsumer {
     try {
       await this.redis.xgroup('CREATE', STREAM_KEY, CONSUMER_GROUP, '$', 'MKSTREAM');
     } catch (e: any) {
-      if (!e.message?.includes('BUSYGROUP')) {
-        console.warn('Consumer group:', e.message);
-      }
+      if (!e.message?.includes('BUSYGROUP')) console.warn('Consumer group:', e.message);
     }
   }
 
@@ -68,10 +69,7 @@ export class EventConsumer {
     }
   }
 
-  stop() {
-    this.running = false;
-    this.redis.disconnect();
-  }
+  stop() { this.running = false; this.redis.disconnect(); }
 
   private parseFields(rawFields: string[]): Record<string, string> {
     const result: Record<string, string> = {};
@@ -89,7 +87,6 @@ export class EventConsumer {
         ) as Array<[string, Array<[string, string[]]>]> | null;
 
         if (!results) continue;
-
         for (const [, entries] of results) {
           for (const [id, rawFields] of entries) {
             const fields = this.parseFields(rawFields);
@@ -103,7 +100,7 @@ export class EventConsumer {
           }
         }
       } catch (err) {
-        console.error('Event consumer loop error:', err);
+        console.error('Event loop error:', err);
         await new Promise(r => setTimeout(r, 2000));
       }
     }
@@ -114,137 +111,100 @@ export class EventConsumer {
 
     switch (type as NotifiableEvent) {
 
-      // ── Аналитика ─────────────────────────────────────────────────
+      // ── Аналитика ────────────────────────────────────────────────────────────────
       case 'analytics.hook_weak':
-        return {
-          text:
-            `⚠️ *Слабый хук обнаружен!*\n\n` +
-            `📹 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
-            `📉 Retention 0–8s: *${payload.retention8s ?? 0}%* (норма > 40%)\n` +
-            `🎣 Хук: "${payload.hook ?? 'N/A'}"\n\n` +
-            `_Скрипт помечен для доработки_`,
-        };
+        return { text:
+          `⚠️ *Слабый хук!*\n\n📹 \`${payload.videoId}\`\n` +
+          `📉 Retention 0–8s: *${payload.retention8s}%*\n🎣 "${payload.hook}"` };
 
       case 'analytics.niche_underperforming':
-        return {
-          text:
-            `📉 *Ниша недозарабатывает!*\n\n` +
-            `🎯 Ниша: *${payload.niche ?? 'N/A'}*\n` +
-            `💰 Ожидаемый RPM: $${payload.expectedRpm ?? 0}\n` +
-            `💰 Фактический RPM: $${payload.actualRpm ?? 0}\n\n` +
-            `_Topic Engine скорректирует приоритет ниши_`,
-        };
+        return { text:
+          `📉 *Ниша недозарабатывает!*\n\n🎯 *${payload.niche}*\n` +
+          `💰 RPM: $${payload.actualRpm} (ожид. $${payload.expectedRpm})` };
 
-      // ── Hook Tester ─────────────────────────────────────────────────
+      // ── Hook Tester ────────────────────────────────────────────────────────────
       case 'hook_tester.winner_selected':
-        return {
-          text:
-            `🏆 *Победитель A/B теста хуков!*\n\n` +
-            `🎣 Хук: "${payload.winnerHook ?? 'N/A'}"\n` +
-            `🧠 Тип: *${payload.winnerType ?? 'N/A'}*\n` +
-            `📈 Retention: *${payload.retention8s ?? 0}%*\n\n` +
-            `_Добавлен в Template Library_`,
-        };
+        return { text:
+          `🏆 *Победитель A/B хуков!*\n\n🎣 "${payload.winnerHook}"\n` +
+          `🧠 ${payload.winnerType} · Retention: *${payload.retention8s}%*` };
 
-      // ── Одобрения ─────────────────────────────────────────────────
+      // ── Одобрения ────────────────────────────────────────────────────────────
       case 'topic.pending_approval': {
         const kb = new InlineKeyboard()
           .text('✅ Одобрить', `topic:approve:${payload.id}`)
           .text('❌ Отклонить', `topic:reject:${payload.id}`);
-        return {
-          text:
-            `📌 *Новая тема ждёт одобрения!*\n\n` +
-            `📝 "${payload.title ?? 'N/A'}"\n` +
-            `🎯 Ниша: ${payload.niche ?? 'N/A'}\n` +
-            `⭐ Приоритет: ${payload.priority ?? 'MEDIUM'}\n` +
-            `📊 Score: ${payload.score ?? 0}`,
-          keyboard: kb,
-        };
+        return { text:
+          `📌 *Тема на одобрение!*\n\n"${payload.title}"\n` +
+          `🎯 ${payload.niche} · ${payload.priority} · Score: ${payload.score}`, keyboard: kb };
       }
 
       case 'script.pending_approval': {
         const kb = new InlineKeyboard()
           .text('✅ Одобрить', `script:approve:${payload.id}`)
           .text('❌ Отклонить', `script:reject:${payload.id}`);
-        return {
-          text:
-            `📝 *Скрипт ждёт одобрения!*\n\n` +
-            `🎤 Тема: "${payload.topicTitle ?? 'N/A'}"\n` +
-            `⏱ Длительность: ~${payload.estimatedDuration ?? 'N/A'} мин\n` +
-            `🎣 Хук: "${payload.hook ?? 'N/A'}"`,
-          keyboard: kb,
-        };
+        return { text:
+          `📝 *Скрипт на одобрение!*\n\n"${payload.topicTitle}"\n` +
+          `~${payload.estimatedDuration} мин · "${payload.hook}"`, keyboard: kb };
       }
 
-      // ── Локализация ─────────────────────────────────────────────────
+      // ── Локализация / Комьюнити ────────────────────────────────────────
       case 'localization.completed':
-        return {
-          text:
-            `✅ *Локализация готова!*\n\n` +
-            `🌍 Язык: *${payload.targetLanguage ?? 'N/A'}*\n` +
-            `📦 Тип: ${payload.localizationType ?? 'N/A'}\n` +
-            `🆔 Задача: \`${payload.taskId ?? 'N/A'}\``,
-        };
+        return { text:
+          `✅ *Локализация готова!*\n\n🌍 *${payload.targetLanguage}* · ${payload.localizationType}\nЗадача: \`${payload.taskId}\`` };
 
       case 'community.topic_exported':
-        return {
-          text:
-            `💬 *Новая тема из комментариев!*\n\n` +
-            `❓ "${payload.question ?? 'N/A'}"\n` +
-            `🔁 Частота: *${payload.count ?? 1}×*\n\n` +
-            `_Добавлена в Topic Engine_`,
-        };
+        return { text:
+          `💬 *Новая тема из комментариев!*\n\n"${payload.question}"\n🔁 ${payload.count}×` };
 
-      // ── 🎨 Thumbnail ────────────────────────────────────────────────
+      // ── 🎨 Thumbnail ────────────────────────────────────────────────────
       case 'thumbnail.ab_test_winner': {
         const ctrPct = payload.winnerCtr != null
-          ? (Number(payload.winnerCtr) * 100).toFixed(2) + '%'
-          : 'N/A';
+          ? (Number(payload.winnerCtr) * 100).toFixed(2) + '%' : 'N/A';
         const hookEmoji: Record<string, string> = {
-          fear: '🚨', curiosity: '🤔', surprise: '🤯',
-          desire: '✨', social_proof: '🔥',
+          fear: '🚨', curiosity: '🤔', surprise: '🤯', desire: '✨', social_proof: '🔥',
         };
-        const emoji = hookEmoji[payload.winnerHookType ?? ''] ?? '🎨';
-        return {
-          text:
-            `🏆 *Победитель A/B теста обложек!*\n\n` +
-            `🎥 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
-            `${emoji} Hook-тип: *${payload.winnerHookType ?? 'N/A'}*\n` +
-            `📈 CTR: *${ctrPct}*\n` +
-            `🆔 Тест: \`${payload.testId ?? 'N/A'}\`\n\n` +
-            `_Обложка выбрана! Admin UI → /thumbnails_`,
-        };
+        return { text:
+          `🏆 *Победитель A/B обложек!*\n\n🎥 \`${payload.videoId}\`\n` +
+          `${hookEmoji[payload.winnerHookType] ?? '🎨'} ${payload.winnerHookType} · CTR: *${ctrPct}*` };
       }
 
       case 'thumbnail.ab_test_created':
-        return {
-          text:
-            `🔬 *A/B тест обложек запущен!*\n\n` +
-            `🎥 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
-            `🎨 Вариантов: *${payload.variantCount ?? 3}*\n\n` +
-            `_Генерация в процессе..._`,
-        };
+        return { text: `🔬 *A/B тест обложек запущен!*\n\n🎥 \`${payload.videoId}\` · ${payload.variantCount} варианта` };
 
       case 'thumbnail.generated':
-        // Уведомляем только если есть реальные затраты (не free-провайдеры)
         if (!payload.costUsd || Number(payload.costUsd) === 0) return null;
-        return {
-          text:
-            `🎨 *Обложка сгенерирована*\n\n` +
-            `📹 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
-            `🤖 Модель: \`${payload.model ?? 'N/A'}\`\n` +
-            `💰 Стоимость: $${payload.costUsd}\n` +
-            `⏱ Время: ${payload.durationMs ?? 0}ms`,
-        };
+        return { text:
+          `🎨 *Обложка сгенерирована*\n\n\`${payload.model}\` · $${payload.costUsd} · ${payload.durationMs}ms` };
 
       case 'thumbnail.failed':
-        return {
-          text:
-            `❌ *Ошибка генерации обложки!*\n\n` +
-            `📹 Видео: \`${payload.videoId ?? 'N/A'}\`\n` +
-            `🔧 Провайдер: ${payload.provider ?? 'N/A'}\n` +
-            `💬 Ошибка: ${(payload.errorMessage ?? 'Unknown').slice(0, 100)}`,
-        };
+        return { text:
+          `❌ *Ошибка генерации обложки!*\n\n${payload.provider}\n${(payload.errorMessage ?? '').slice(0, 80)}` };
+
+      // ── 🔍 Competitor Intelligence ──────────────────────────────────────
+      case 'competitor.trend_detected': {
+        // Отправляем только для видео с высоким велосититом
+        const velocity = Number(payload.viewVelocity ?? 0);
+        if (velocity < 5000) return null; // шум для не очень вирусных
+        return { text:
+          `📈 *Тренд конкурента!*\n\n` +
+          `📺 ${payload.channelName}${payload.channelNiche ? ` [${payload.channelNiche}]` : ''}\n` +
+          `📊 ${velocity.toLocaleString()} просм/день\n` +
+          `🎥 _${payload.title}_\n\n` +
+          `_Запусти AI-анализ: /competitors_` };
+      }
+
+      case 'competitor.ideas_bulk_generated':
+        return { text:
+          `💡 *AI сгенерировал идеи!*\n\n` +
+          `📺 ${payload.channelName}\n` +
+          `💡 Новых идей: *${payload.ideasCount}*\n\n` +
+          `📌 /ideas — посмотреть и экспортировать` };
+
+      case 'competitor.idea_exported':
+        return { text:
+          `✅ *Идея экспортирована в Topic Engine!*\n\n` +
+          `📌 "${payload.title}"\n` +
+          `📡 Источник: ${payload.sourceChannel}` };
 
       default:
         return null;
