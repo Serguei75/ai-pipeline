@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Каждый API-вызов любого модуля, вызывающий затраты
+model CostEntry {
+  id           String   @id @default(cuid())
+  module       String   // topic-engine | script-engine | voice-engine | thumbnail-engine ...
+  provider     String   // openai | elevenlabs | huggingface | fal | cloudflare
+  model        String   // gpt-4o | FLUX.1-schnell | eleven_multilingual_v2 ...
+  videoId      String?  // Связь с видео (ROI-аналитика)
+  jobId        String?  // Связь с конкретным заданием
+  eventType    String   // Исходное событие Event Bus
+
+  // Детали расхода
+  inputTokens  Int?     // OpenAI input tokens
+  outputTokens Int?     // OpenAI output tokens
+  characters   Int?     // ElevenLabs characters
+  steps        Int?     // Diffusion steps
+  durationSec  Float?   // Video generation seconds
+  costUsd      Decimal  @db.Decimal(10, 6)
+
+  createdAt    DateTime @default(now())
+
+  @@index([module])
+  @@index([provider])
+  @@index([videoId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("cost_entries")
+}
+
+// Ежедневные агрегаты для графиков и дашборда
+model DailyCostSummary {
+  id           String   @id @default(cuid())
+  date         DateTime @db.Date
+  module       String
+  provider     String
+  totalCostUsd Decimal  @db.Decimal(10, 6) @default(0)
+  requestCount Int      @default(0)
+
+  @@unique([date, module, provider])
+  @@index([date])
+  @@map("daily_cost_summaries")
+}

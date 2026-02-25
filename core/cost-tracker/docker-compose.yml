@@ -1,0 +1,50 @@
+version: '3.9'
+
+services:
+  cost-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-pipeline-cost-tracker
+    restart: unless-stopped
+    ports:
+      - "3010:3010"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@cost-tracker-db:5432/cost_tracker
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - PORT=3010
+      - NODE_ENV=production
+    depends_on:
+      cost-tracker-db:
+        condition: service_healthy
+    networks:
+      - ai-pipeline-network
+
+  cost-tracker-db:
+    image: postgres:16-alpine
+    container_name: ai-pipeline-cost-tracker-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=cost_tracker
+    ports:
+      - "5440:5432"
+    volumes:
+      - cost-tracker-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-pipeline-network
+
+volumes:
+  cost-tracker-db-data:
+
+networks:
+  ai-pipeline-network:
+    external: true
+    name: ai-pipeline-network
