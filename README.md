@@ -1,177 +1,84 @@
-# 🤖 AI Pipeline — YouTube Content Automation System
+# 🤖 AI YouTube Pipeline
 
-> Full-stack AI pipeline for creating, localizing, publishing and analyzing YouTube content.
-> 8 microservices + Admin UI. Each service has its own Docker Compose.
+Полностью автоматизированный пайплайн для создания YouTube-контента: от темы до готового видео с обложкой и локализацией.
 
-[![Node.js](https://img.shields.io/badge/Node.js-20-green)]
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)]
-[![Fastify](https://img.shields.io/badge/Fastify-4-black)]
-[![Next.js](https://img.shields.io/badge/Next.js-14-white)]
-[![Prisma](https://img.shields.io/badge/Prisma-5-purple)]
-
----
-
-## 📊 Architecture
+## 📊 Архитектура
 
 ```
-┌──────────────────────────────────────────────────┐
-│            ADMIN UI  :3000  (Next.js 14)              │
-└────────┬─────────┬────────┬─────────┬────────┘
-         │        │         │         │        │
-    :3001 │   :3002 │    :3003 │    :3004 │   :3005 │
-  ┌──────┴┐ ┌─────┴┐ ┌──────┴┐ ┌──────┴┐ ┌─────┴┐
-  │ Topic  │ │Script  │ │ Voice  │ │ Media  │ │ Anal. │
-  │ Engine │ │Engine  │ │ Engine │ │ Engine │ │Engine │
-  └──────┘ └─────┘ └──────┘ └──────┘ └─────┘
-
-    :3006 Community Engine  →  AI comment manager
-    :3007 Localization Engine →  subtitles + dubbing
-
-  Data flow:
-  Topics → Scripts → Voice → Media → YouTube
-                                   ↓
-                           Analytics ← Comments
-                                   ↓
-                          Localization (multi-market)
+Admin UI :3000  │  Telegram Bot
+        ↓↓↓↓↓↓↓↓
+API Gateway :3100
+        ┃
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃                   ┃                   ┃
+Topic :3001       Script :3002      Voice :3003
+Media :3004    Analytics :3005  Community :3006
+Locale :3007   HookTest :3008  Thumbnail :3009
+        ┃
+Event Bus (Redis :6379)
 ```
 
----
+## 📦 Модули
 
-## 📦 Modules
+| # | Модуль | Порт | Описание |
+|---|---|---|---|
+| 1 | Topic Engine | 3001 | GPT-4o генерация тем |
+| 2 | Script Engine | 3002 | Скрипты + 3 варианта хука |
+| 3 | Voice Engine | 3003 | ElevenLabs TTS |
+| 4 | Media Engine | 3004 | Сборка видео |
+| 5 | Analytics Engine | 3005 | YouTube API + retention |
+| 6 | Admin UI | 3000 | Next.js, i18n RU/EN |
+| 7 | Community Engine | 3006 | Комментарии + AI-ответы |
+| 8 | Localization Engine | 3007 | Субтитры + дубляж |
+| 9 | API Gateway | 3100 | Единая точка входа |
+| 10 | Hook Tester | 3008 | A/B тест хуков |
+| 11 | **Thumbnail Engine** | **3009** | **Multi-provider обложки** |
+| 12 | Event Bus (Redis) | 6379 | Async-сообщения между модулями |
+| 13 | Telegram Bot | — | Одобрения + push-уведомления |
 
-| # | Module | Port | Description | Docker DB port |
-|---|--------|------|-------------|----------------|
-| 1 | **Topic Engine** | 3001 | Trend discovery, niche CPM scoring, hook ideas, market targeting | 5432 |
-| 2 | **Script Engine** | 3002 | LLM script generation (SHORT/FUEL + DEEP/Intellectual), hook templates | 5433 |
-| 3 | **Voice Engine** | 3003 | ElevenLabs TTS, 5 voices, multi-language audio generation | 5434 |
-| 4 | **Media Engine** | 3004 | HeyGen avatars, Pexels B-roll, FFmpeg assembly, CTV/Shorts formats | 5435 |
-| 5 | **Analytics Engine** | 3005 | YouTube Data/Analytics API, CPM/RPM, hook retention, ROI dashboard | 5436 |
-| 6 | **Admin UI** | 3000 | Next.js 14 + shadcn/ui, TanStack Query, i18n RU/EN | — |
-| 7 | **Community Engine** | 3006 | YouTube comment sync, AI classification, reply drafts, topic extraction | 5437 |
-| 8 | **Localization Engine** | 3007 | Stage1: subtitles+metadata, Stage2: ElevenLabs dubbing + multi-audio | 5438 |
-
----
-
-## ⚡ Quick Start
-
-Each module runs independently with its own docker-compose:
+## 🚀 Быстрый старт
 
 ```bash
-# Clone
-git clone https://github.com/Serguei75/ai-pipeline.git
-cd ai-pipeline
+# 1. Общая Docker-сеть
+docker network create ai-pipeline-network
 
-# Start any module
-cd core/topic-engine
-cp .env.example .env   # fill in your API keys
-docker-compose up -d
+# 2. Redis Event Bus
+cd shared/events && docker compose up -d
 
-# APIs available:
-# http://localhost:3001/health
-# http://localhost:3001/topics
+# 3. Любой модуль
+cd core/thumbnail-engine
+cp .env.example .env && nano .env
+docker compose up -d
 ```
 
-### Start Admin UI
+## 📖 Документация
+
+- [docs/architecture.md](docs/architecture.md) — Архитектура + Mermaid-диаграммы
+- [docs/api-reference.md](docs/api-reference.md) — API Reference (все эндпоинты)
+- [docs/events.md](docs/events.md) — Event Bus справочник событий
+- [docs/providers.md](docs/providers.md) — AI провайдеры и цены
+- [docs/deployment.md](docs/deployment.md) — Инструкция по деплойменту
+- [docs/changelog.md](docs/changelog.md) — История версий
+
+## 💬 Быстрый тест
+
 ```bash
-cd apps/admin-ui
-cp .env.example .env   # set NEXT_PUBLIC_*_URL for each service
-npm install
-npm run dev
-# http://localhost:3000
+# Статус системы
+curl http://localhost:3100/health/all
+
+# Генерация обложки
+curl -X POST http://localhost:3100/thumbnails/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "AI YouTube pipeline, tech thumbnail 2026"}'
+
+# Генерация темы
+curl -X POST http://localhost:3100/topics/generate \
+  -H "Content-Type: application/json" \
+  -d '{"niche": "artificial-intelligence", "count": 5}'
 ```
 
-### Environment variables per module
+## 🛠️ Технологический стек
 
-| Module | Required keys |
-|--------|---------------|
-| Topic Engine | `OPENAI_API_KEY`, `YOUTUBE_API_KEY` |
-| Script Engine | `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`) |
-| Voice Engine | `ELEVENLABS_API_KEY` |
-| Media Engine | `HEYGEN_API_KEY`, `PEXELS_API_KEY` |
-| Analytics Engine | `YOUTUBE_API_KEY`, `YOUTUBE_REFRESH_TOKEN` |
-| Community Engine | `OPENAI_API_KEY`, `YOUTUBE_API_KEY` |
-| Localization Engine | `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` |
+`Node.js 20` + `Fastify 4` + `TypeScript` + `Prisma 5` + `Redis 7 Streams` + `Next.js 14` + `Docker`
 
----
-
-## 📁 Project Structure
-
-```
-ai-pipeline/
-├── apps/
-│   └── admin-ui/          # Next.js 14 Admin Dashboard
-├── core/
-│   ├── topic-engine/      # Module 1
-│   ├── script-engine/     # Module 2
-│   ├── voice-engine/      # Module 3
-│   ├── media-engine/      # Module 4
-│   ├── analytics-engine/  # Module 5
-│   ├── community-engine/  # Module 7
-│   └── localization-engine/ # Module 8
-├── shared/
-│   ├── config/markets.ts  # Tier-1 CPM data (NO=$43, AU=$36, US=$32...)
-│   └── types/index.ts     # Shared TypeScript types
-├── docs/
-│   └── ARCHITECTURE.md    # Full architecture diagram
-├── docker-compose.yml   # Root compose (all services)
-└── package.json         # Workspace config
-```
-
----
-
-## 🎥 Channel Strategy
-
-Two channel types are built into the pipeline:
-
-| Type | Format | Duration | Style |
-|------|--------|----------|-------|
-| **FUEL** | Shorts / TikTok-style | 30–90 sec | Hook-first, AI TTS, fast cuts |
-| **INTELLECTUAL** | Video essays / Deep dives | 8–15 min | Human voice, CTV-optimized, research-heavy |
-
-Target markets (highest CPM): **NO ≈$43 → AU ≈$36 → US ≈$32 → CH ≈$23**
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Tech |
-|-------|------|
-| Runtime | Node.js 20, TypeScript 5.3 |
-| API Framework | Fastify 4 |
-| ORM | Prisma 5 + PostgreSQL 15 |
-| Frontend | Next.js 14, Tailwind CSS, shadcn/ui, TanStack Query |
-| AI / LLM | OpenAI GPT-4o-mini, Anthropic Claude (optional) |
-| TTS | ElevenLabs (multi-voice, multi-language) |
-| Avatar | HeyGen API |
-| Video | FFmpeg (assembly, subtitles, format conversion) |
-| B-roll | Pexels API |
-| YouTube | YouTube Data API v3 + Analytics API |
-| Containers | Docker + Docker Compose (per module) |
-| CI/CD | GitHub Actions |
-
----
-
-## 📊 Status
-
-- [x] Module 1: Topic Engine — production-ready
-- [x] Module 2: Script Engine — production-ready
-- [x] Module 3: Voice Engine — production-ready
-- [x] Module 4: Media Engine — production-ready
-- [x] Module 5: Analytics Engine — production-ready
-- [x] Module 6: Admin UI — production-ready (i18n RU/EN)
-- [x] Module 7: Community Engine — production-ready
-- [x] Module 8: Localization Engine — production-ready
-- [ ] API Gateway — planned
-- [ ] Event Bus (Redis Streams) — planned
-- [ ] Analytics → Script feedback loop — planned
-- [ ] Telegram Bot — planned
-
----
-
-## 💡 Contributing
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full system design.
-
----
-
-*Built with ❤️ by Serguei75*
+**AI**: OpenAI GPT-4o · ElevenLabs · HuggingFace FLUX · FAL.AI Flux 2 · Cloudflare Workers AI
