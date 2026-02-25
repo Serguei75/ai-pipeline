@@ -1,17 +1,26 @@
 /**
  * TtsJobService — Async TTS Job Queue
  *
- * High-level orchestrator:
- *   script text → ElevenLabs TTS → audio.mp3 on disk → DB job record
+ * Orchestrates:
+ *   script text → TtsRouter.select(opts) → provider.generate() → audio file → DB record
  *
  * Job lifecycle: PENDING → PROCESSING → DONE | FAILED
  * Audio files saved to: AUDIO_OUTPUT_DIR (env, default ./output/audio)
+ *
+ * Provider routing:
+ *   clone=true  → ResembleProvider ($5-19/mo, voice cloning)
+ *   mode='dev'  → KokoroProvider   ($0, HuggingFace)
+ *   default     → PollyProvider    (~$2-5/mo, Amazon Neural)
  */
 
 import { randomUUID } from 'crypto'
 import path from 'path'
 import fs from 'fs'
-import { ElevenLabsService, MODELS, type ModelId, type TtsOptions } from './elevenlabs.service.js'
+import { createWriteStream } from 'fs'
+import { pipeline } from 'stream/promises'
+import { Readable } from 'stream'
+import { TtsRouter }  from '../providers/tts-router.js'
+import type { RoutingOpts, RoutingMode, QualityTier } from '../providers/tts-provider.interface.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -21,14 +30,16 @@ export interface TtsJob {
   id: string
   status: JobStatus
   scriptText: string
-  voiceId: string
-  model: ModelId
-  stability: number
-  similarityBoost: number
+  voiceId: string | null
+  mode: RoutingMode
+  quality: QualityTier
+  clone: boolean
+  provider: string | null       // which provider was selected
   audioPath: string | null      // absolute path once DONE
   audioUrl: string | null       // public URL once DONE
   characterCount: number | null
   durationSeconds: number | null
+  estimatedCostUsd: number | null
   errorMessage: string | null
   createdAt: string
   updatedAt: string
@@ -36,101 +47,112 @@ export interface TtsJob {
 
 export interface GenerateVoiceoverInput {
   scriptText: string
-  voiceId?: string              // defaults to ELEVENLABS_DEFAULT_VOICE_ID
-  model?: ModelId
-  stability?: number            // 0-1, default 0.5
-  similarityBoost?: number      // 0-1, default 0.75
-  style?: number                // 0-1, default 0.0
+  voiceId?: string
+  mode?: RoutingMode          // 'dev' | 'prod' | 'clone' (default: 'prod')
+  quality?: QualityTier       // 'free' | 'economy' | 'standard' | 'premium'
+  clone?: boolean             // true = use ResembleProvider for voice cloning
 }
 
-// ─── In-memory store (replace with Prisma in production) ────────────────────────
-// TODO: swap jobStore for Prisma VoiceJob model when schema is ready
+// ─── In-memory store (replace with Prisma VoiceJob model when schema is ready) ──────
 
 const jobStore = new Map<string, TtsJob>()
 
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export class TtsJobService {
-  private el: ElevenLabsService
-  private outputDir: string
-  private publicBaseUrl: string
+  private router       = new TtsRouter()
+  private outputDir:   string
+  private publicBase:  string
 
   constructor() {
-    const apiKey = process.env.ELEVENLABS_API_KEY
-    if (!apiKey) throw new Error('ELEVENLABS_API_KEY env var is required')
-    this.el = new ElevenLabsService(apiKey)
-    this.outputDir = process.env.AUDIO_OUTPUT_DIR ?? path.resolve('./output/audio')
-    this.publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3003}`
+    this.outputDir  = process.env.AUDIO_OUTPUT_DIR ?? path.resolve('./output/audio')
+    this.publicBase = process.env.PUBLIC_BASE_URL  ?? `http://localhost:${process.env.PORT ?? 3003}`
     fs.mkdirSync(this.outputDir, { recursive: true })
   }
 
-  // ── Create & enqueue a new TTS job ────────────────────────────────────────
+  // ── Create & enqueue ─────────────────────────────────────────────────────────
 
   async createJob(input: GenerateVoiceoverInput): Promise<TtsJob> {
-    const defaultVoiceId = process.env.ELEVENLABS_DEFAULT_VOICE_ID ?? 'EXAVITQu4vr4xnSDxMaL' // "Bella"
+    const mode    = input.mode    ?? 'prod'
+    const quality = input.quality ?? 'economy'
+    const clone   = input.clone   ?? false
 
     const job: TtsJob = {
-      id:              randomUUID(),
-      status:          'PENDING',
-      scriptText:      input.scriptText,
-      voiceId:         input.voiceId ?? defaultVoiceId,
-      model:           input.model ?? MODELS.MULTILINGUAL,
-      stability:       input.stability       ?? 0.5,
-      similarityBoost: input.similarityBoost ?? 0.75,
-      audioPath:       null,
-      audioUrl:        null,
-      characterCount:  null,
-      durationSeconds: null,
-      errorMessage:    null,
-      createdAt:       new Date().toISOString(),
-      updatedAt:       new Date().toISOString(),
+      id:               randomUUID(),
+      status:           'PENDING',
+      scriptText:       input.scriptText,
+      voiceId:          input.voiceId ?? null,
+      mode,
+      quality,
+      clone,
+      provider:         null,
+      audioPath:        null,
+      audioUrl:         null,
+      characterCount:   null,
+      durationSeconds:  null,
+      estimatedCostUsd: null,
+      errorMessage:     null,
+      createdAt:        new Date().toISOString(),
+      updatedAt:        new Date().toISOString(),
     }
 
     jobStore.set(job.id, job)
 
-    // Fire-and-forget — process in background
-    this.processJob(job.id).catch((err) => {
+    // Fire-and-forget background processing
+    this.processJob(job.id).catch((err) =>
       console.error(`[TtsJobService] Job ${job.id} failed:`, err)
-    })
+    )
 
     return job
   }
 
-  // ── Process a job (internal) ──────────────────────────────────────────────
+  // ── Process (internal) ─────────────────────────────────────────────────────
 
   private async processJob(jobId: string): Promise<void> {
     const job = jobStore.get(jobId)
     if (!job) return
 
-    this.update(jobId, { status: 'PROCESSING' })
+    this.patch(jobId, { status: 'PROCESSING' })
 
     try {
-      const opts: TtsOptions = {
-        voiceId:         job.voiceId,
-        text:            job.scriptText,
-        model:           job.model,
-        stability:       job.stability,
-        similarityBoost: job.similarityBoost,
+      const routingOpts: RoutingOpts = {
+        mode:    job.mode,
+        quality: job.quality,
+        clone:   job.clone,
       }
 
-      const result = await this.el.generateTts(opts)
+      const provider = this.router.select(routingOpts)
+      this.patch(jobId, { provider: provider.name })
 
-      const filename  = `${jobId}.mp3`
+      const result = await provider.generate(job.scriptText, {
+        voiceId: job.voiceId ?? undefined,
+      })
+
+      const ext      = result.contentType.includes('wav') ? 'wav' : 'mp3'
+      const filename = `${jobId}.${ext}`
       const audioPath = path.join(this.outputDir, filename)
-      await this.el.saveAudio(result.audioBuffer, audioPath)
 
-      const audioUrl = `${this.publicBaseUrl}/audio/${filename}`
+      // Write buffer to disk via stream pipeline
+      await pipeline(
+        Readable.from(result.audioBuffer),
+        createWriteStream(audioPath)
+      )
 
-      this.update(jobId, {
-        status:          'DONE',
+      const audioUrl = `${this.publicBase}/audio/${filename}`
+
+      this.patch(jobId, {
+        status:           'DONE',
         audioPath,
         audioUrl,
-        characterCount:  result.characterCount,
-        durationSeconds: this.estimateDuration(result.characterCount),
+        characterCount:   result.characterCount,
+        durationSeconds:  this.estimateDuration(result.characterCount),
+        estimatedCostUsd: result.estimatedCostUsd,
       })
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      this.update(jobId, { status: 'FAILED', errorMessage: msg })
+      this.patch(jobId, {
+        status:       'FAILED',
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
@@ -150,30 +172,47 @@ export class TtsJobService {
 
   async retryJob(id: string): Promise<TtsJob> {
     const job = jobStore.get(id)
-    if (!job) throw new Error(`Job ${id} not found`)
-    if (job.status !== 'FAILED') throw new Error(`Job ${id} is not in FAILED state`)
-    this.update(id, { status: 'PENDING', errorMessage: null })
+    if (!job)                   throw new Error(`Job ${id} not found`)
+    if (job.status !== 'FAILED') throw new Error(`Job ${id} is not in FAILED state (current: ${job.status})`)
+    this.patch(id, { status: 'PENDING', errorMessage: null, provider: null })
     this.processJob(id).catch(console.error)
     return jobStore.get(id)!
   }
 
-  // ── Delegate to ElevenLabs ────────────────────────────────────────────────
+  // ── Delegate to providers ────────────────────────────────────────────────
 
-  listVoices()                                  { return this.el.listVoices() }
-  generatePreview(text: string, voiceId: string){ return this.el.generatePreview(text, voiceId) }
-  getUsage()                                    { return this.el.getUsage() }
+  async listVoices(opts?: RoutingOpts) {
+    if (opts) {
+      // List voices for specific provider
+      return this.router.select(opts).listVoices()
+    }
+    // Aggregate all providers
+    const results = await Promise.allSettled(this.router.all().map((p) => p.listVoices()))
+    return results
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof this.router.kokoro.listVoices>>> => r.status === 'fulfilled')
+      .flatMap((r) => r.value)
+  }
 
-  // ── Internal helpers ────────────────────────────────────────────────────────
+  async generatePreview(text: string, voiceId: string, opts?: RoutingOpts) {
+    const provider = this.router.select(opts ?? { mode: 'prod' })
+    const result   = await provider.generate(text.slice(0, 200), { voiceId })
+    return result.audioBuffer
+  }
 
-  private update(id: string, patch: Partial<TtsJob>) {
+  estimateCost(charsPerMonth: number, opts?: RoutingOpts) {
+    return this.router.estimateMonthlyCost(charsPerMonth, opts ?? {})
+  }
+
+  // ── Internal helpers ─────────────────────────────────────────────────────
+
+  private patch(id: string, patch: Partial<TtsJob>) {
     const job = jobStore.get(id)
     if (!job) return
     Object.assign(job, patch, { updatedAt: new Date().toISOString() })
   }
 
-  // ~150 characters per second for natural speech
   private estimateDuration(chars: number | null): number | null {
     if (!chars) return null
-    return Math.round(chars / 150)
+    return Math.round(chars / 150)  // ~150 chars/second natural speech
   }
 }
