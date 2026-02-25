@@ -1,158 +1,177 @@
-# AI Pipeline — YouTube Content Automation System
+# 🤖 AI Pipeline — YouTube Content Automation System
 
-> Стратегия: **ИИ + человек**, а не «чистый ИИ-спам».
-> Цель: масштабируемый премиальный контент → агрессивная локализация → Tier-1 рынки.
+> Full-stack AI pipeline for creating, localizing, publishing and analyzing YouTube content.
+> 8 microservices + Admin UI. Each service has its own Docker Compose.
 
----
-
-## 🎯 Два канала — одно ядро
-
-### Канал 1 — «Топливный» (Fuel)
-- Короткие ролики 30–90 сек на трендовых темах
-- Максимум автоматизации, быстрый денежный поток
-- Тест ниш и хуков для интеллектуального канала
-
-### Канал 2 — «Интеллектуальный» (Intellectual)
-- Глубокий контент 8–15 мин с видео-аватарами
-- Высокий retention, Tier-1 аудитория, сильный бренд
-- Диалоговый формат, работа с комментариями, мультиязычность
+[![Node.js](https://img.shields.io/badge/Node.js-20-green)]
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)]
+[![Fastify](https://img.shields.io/badge/Fastify-4-black)]
+[![Next.js](https://img.shields.io/badge/Next.js-14-white)]
+[![Prisma](https://img.shields.io/badge/Prisma-5-purple)]
 
 ---
 
-## 🧠 6 Модулей единого ядра
+## 📊 Architecture
 
-| # | Модуль | Назначение | Статус |
-|---|--------|-----------|--------|
-| 1 | **Topic Engine** | NLP + тренды → список тем с CPM-оценкой | ✅ Готов |
-| 2 | **Script Engine** | LLM → скрипты 2 форматов (Short / Deep) | ⏳ Планируется |
-| 3 | **Voice & TTS** | Клон голоса, мультиязычная озвучка | ⏳ Планируется |
-| 4 | **Media Pipeline** | Аватары, монтаж, CTV-оптимизация | ⏳ Планируется |
-| 5 | **Analytics Engine** | Retention, RPM, CTR → обратная связь | ⏳ Планируется |
-| 6 | **Community Manager** | AI-ответы в комментариях → новые темы | ⏳ Планируется |
+```
+┌──────────────────────────────────────────────────┐
+│            ADMIN UI  :3000  (Next.js 14)              │
+└────────┬─────────┬────────┬─────────┬────────┘
+         │        │         │         │        │
+    :3001 │   :3002 │    :3003 │    :3004 │   :3005 │
+  ┌──────┴┐ ┌─────┴┐ ┌──────┴┐ ┌──────┴┐ ┌─────┴┐
+  │ Topic  │ │Script  │ │ Voice  │ │ Media  │ │ Anal. │
+  │ Engine │ │Engine  │ │ Engine │ │ Engine │ │Engine │
+  └──────┘ └─────┘ └──────┘ └──────┘ └─────┘
 
----
+    :3006 Community Engine  →  AI comment manager
+    :3007 Localization Engine →  subtitles + dubbing
 
-## 💰 Монетизация: Tier-1 рынки и топ-ниши
-
-### CPM по странам (целевые рынки)
-
-| Страна | CPM | Приоритет |
-|--------|-----|-----------|
-| 🇳🇴 Норвегия | $43 | ⭐⭐⭐ |
-| 🇦🇺 Австралия | $36 | ⭐⭐⭐ |
-| 🇺🇸 США | $32 | ⭐⭐⭐ |
-| 🇨🇭 Швейцария | $23 | ⭐⭐⭐ |
-| 🇨🇦 Канада | $18 | ⭐⭐ |
-| 🇩🇪 Германия | $15 | ⭐⭐ |
-| 🇬🇧 Великобритания | $13 | ⭐⭐ |
-
-### Топ-ниши по CPM
-
-| Ниша | CPM диапазон |
-|------|--------------|
-| 💰 Финансы / Инвестиции | $15–$50 |
-| 💻 SaaS / Программное обеспечение | $10–$25 |
-| 🎓 Онлайн-образование | $10–$25 |
-| 🏥 Здоровье (без медицины) | $8–$15 |
-| 📱 Технологии | $8–$12 |
+  Data flow:
+  Topics → Scripts → Voice → Media → YouTube
+                                   ↓
+                           Analytics ← Comments
+                                   ↓
+                          Localization (multi-market)
+```
 
 ---
 
-## 🎬 Ключевые правила контента (из исследования)
+## 📦 Modules
 
-- **45% watch time** YouTube приходится на CTV (телевизоры) → оптимизируем под большой экран
-- **Решение «смотреть/нет»** принимается в первые **8 секунд** → хук обязателен
-- **«AI slop»** даёт удержание на **70% ниже**, чем контент с человеческим присутствием
-- Рост комментариев **+38%** → community management = часть пайплайна
+| # | Module | Port | Description | Docker DB port |
+|---|--------|------|-------------|----------------|
+| 1 | **Topic Engine** | 3001 | Trend discovery, niche CPM scoring, hook ideas, market targeting | 5432 |
+| 2 | **Script Engine** | 3002 | LLM script generation (SHORT/FUEL + DEEP/Intellectual), hook templates | 5433 |
+| 3 | **Voice Engine** | 3003 | ElevenLabs TTS, 5 voices, multi-language audio generation | 5434 |
+| 4 | **Media Engine** | 3004 | HeyGen avatars, Pexels B-roll, FFmpeg assembly, CTV/Shorts formats | 5435 |
+| 5 | **Analytics Engine** | 3005 | YouTube Data/Analytics API, CPM/RPM, hook retention, ROI dashboard | 5436 |
+| 6 | **Admin UI** | 3000 | Next.js 14 + shadcn/ui, TanStack Query, i18n RU/EN | — |
+| 7 | **Community Engine** | 3006 | YouTube comment sync, AI classification, reply drafts, topic extraction | 5437 |
+| 8 | **Localization Engine** | 3007 | Stage1: subtitles+metadata, Stage2: ElevenLabs dubbing + multi-audio | 5438 |
 
 ---
 
-## 📦 Структура проекта
+## ⚡ Quick Start
+
+Each module runs independently with its own docker-compose:
+
+```bash
+# Clone
+git clone https://github.com/Serguei75/ai-pipeline.git
+cd ai-pipeline
+
+# Start any module
+cd core/topic-engine
+cp .env.example .env   # fill in your API keys
+docker-compose up -d
+
+# APIs available:
+# http://localhost:3001/health
+# http://localhost:3001/topics
+```
+
+### Start Admin UI
+```bash
+cd apps/admin-ui
+cp .env.example .env   # set NEXT_PUBLIC_*_URL for each service
+npm install
+npm run dev
+# http://localhost:3000
+```
+
+### Environment variables per module
+
+| Module | Required keys |
+|--------|---------------|
+| Topic Engine | `OPENAI_API_KEY`, `YOUTUBE_API_KEY` |
+| Script Engine | `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`) |
+| Voice Engine | `ELEVENLABS_API_KEY` |
+| Media Engine | `HEYGEN_API_KEY`, `PEXELS_API_KEY` |
+| Analytics Engine | `YOUTUBE_API_KEY`, `YOUTUBE_REFRESH_TOKEN` |
+| Community Engine | `OPENAI_API_KEY`, `YOUTUBE_API_KEY` |
+| Localization Engine | `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` |
+
+---
+
+## 📁 Project Structure
 
 ```
 ai-pipeline/
-├── core/
-│   ├── topic-engine/          ✅ Module 1 — Topic discovery & management
-│   ├── script-engine/         ⏳ Module 2 — LLM script generation
-│   ├── voice-engine/          ⏳ Module 3 — TTS & voice cloning
-│   ├── media-pipeline/        ⏳ Module 4 — Avatar, montage, CTV
-│   ├── analytics-engine/      ⏳ Module 5 — YouTube metrics & feedback
-│   └── community-manager/     ⏳ Module 6 — AI comment management
 ├── apps/
-│   └── admin/                 ✅ Admin Dashboard
+│   └── admin-ui/          # Next.js 14 Admin Dashboard
+├── core/
+│   ├── topic-engine/      # Module 1
+│   ├── script-engine/     # Module 2
+│   ├── voice-engine/      # Module 3
+│   ├── media-engine/      # Module 4
+│   ├── analytics-engine/  # Module 5
+│   ├── community-engine/  # Module 7
+│   └── localization-engine/ # Module 8
 ├── shared/
-│   ├── types/                 # Shared TypeScript types
-│   └── config/                # Shared config (Tier-1 markets, CPM)
+│   ├── config/markets.ts  # Tier-1 CPM data (NO=$43, AU=$36, US=$32...)
+│   └── types/index.ts     # Shared TypeScript types
 ├── docs/
-│   └── ARCHITECTURE.md        # Full system architecture
-└── .github/workflows/
-    └── ci.yml                 # GitHub Actions CI
+│   └── ARCHITECTURE.md    # Full architecture diagram
+├── docker-compose.yml   # Root compose (all services)
+└── package.json         # Workspace config
 ```
 
 ---
 
-## 🚀 Быстрый старт — Topic Engine
+## 🎥 Channel Strategy
 
-```bash
-git clone https://github.com/Serguei75/ai-pipeline.git
-cd ai-pipeline/core/topic-engine
+Two channel types are built into the pipeline:
 
-# Docker (рекомендуется)
-docker-compose up -d
+| Type | Format | Duration | Style |
+|------|--------|----------|-------|
+| **FUEL** | Shorts / TikTok-style | 30–90 sec | Hook-first, AI TTS, fast cuts |
+| **INTELLECTUAL** | Video essays / Deep dives | 8–15 min | Human voice, CTV-optimized, research-heavy |
 
-# API будет доступен на http://localhost:3001
-curl http://localhost:3001/health
-```
+Target markets (highest CPM): **NO ≈$43 → AU ≈$36 → US ≈$32 → CH ≈$23**
 
 ---
 
-## 🧪 API Examples
+## 🛠️ Tech Stack
 
-```bash
-# Создать топик для топливного канала
-curl -X POST http://localhost:3001/api/topics \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "5 AI Tools That Will Replace Your Job in 2026",
-    "niche": "TECH",
-    "source": "YOUTUBE_TRENDS",
-    "channelType": "FUEL",
-    "contentFormat": "SHORT_FUEL",
-    "targetMarkets": ["US", "UK", "AU"],
-    "keywords": ["AI", "jobs", "automation", "2026"]
-  }'
-
-# Создать топик для интеллектуального канала
-curl -X POST http://localhost:3001/api/topics \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "How to Build Passive Income with AI in 2026 (Full Guide)",
-    "niche": "FINANCE",
-    "source": "GOOGLE_TRENDS",
-    "channelType": "INTELLECTUAL",
-    "contentFormat": "DEEP_ESSAY",
-    "targetMarkets": ["US", "CA", "AU", "NO"],
-    "keywords": ["passive income", "AI", "2026", "finance"]
-  }'
-
-# AI-генерация топиков
-curl -X POST http://localhost:3001/api/topics/generate \
-  -H "Content-Type: application/json" \
-  -d '{"niche": "FINANCE", "channelType": "INTELLECTUAL", "targetMarkets": ["US", "NO", "AU"], "count": 5}'
-```
+| Layer | Tech |
+|-------|------|
+| Runtime | Node.js 20, TypeScript 5.3 |
+| API Framework | Fastify 4 |
+| ORM | Prisma 5 + PostgreSQL 15 |
+| Frontend | Next.js 14, Tailwind CSS, shadcn/ui, TanStack Query |
+| AI / LLM | OpenAI GPT-4o-mini, Anthropic Claude (optional) |
+| TTS | ElevenLabs (multi-voice, multi-language) |
+| Avatar | HeyGen API |
+| Video | FFmpeg (assembly, subtitles, format conversion) |
+| B-roll | Pexels API |
+| YouTube | YouTube Data API v3 + Analytics API |
+| Containers | Docker + Docker Compose (per module) |
+| CI/CD | GitHub Actions |
 
 ---
 
-## 🛠️ Технологии
+## 📊 Status
 
-- **Backend:** Node.js 20, TypeScript, Fastify, Prisma, PostgreSQL
-- **Frontend:** HTML5, CSS3, Vanilla JS (Admin UI)
-- **AI/LLM:** OpenAI GPT-4, Anthropic Claude (planned)
-- **TTS:** ElevenLabs, clone voice (planned)
-- **Avatars:** HeyGen, D-ID (planned)
-- **Analytics:** YouTube Data API v3 (planned)
-- **Infrastructure:** Docker, Docker Compose, GitHub Actions
+- [x] Module 1: Topic Engine — production-ready
+- [x] Module 2: Script Engine — production-ready
+- [x] Module 3: Voice Engine — production-ready
+- [x] Module 4: Media Engine — production-ready
+- [x] Module 5: Analytics Engine — production-ready
+- [x] Module 6: Admin UI — production-ready (i18n RU/EN)
+- [x] Module 7: Community Engine — production-ready
+- [x] Module 8: Localization Engine — production-ready
+- [ ] API Gateway — planned
+- [ ] Event Bus (Redis Streams) — planned
+- [ ] Analytics → Script feedback loop — planned
+- [ ] Telegram Bot — planned
 
-## 📝 License
+---
 
-MIT
+## 💡 Contributing
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full system design.
+
+---
+
+*Built with ❤️ by Serguei75*
