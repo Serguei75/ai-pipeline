@@ -332,7 +332,9 @@ services:
 
   thumbnail-engine:
     <<: *service
-    build: { context: ./core/thumbnail-engine, dockerfile: Dockerfile }
+    build:
+      context: .
+      dockerfile: core/thumbnail-engine/Dockerfile
     container_name: thumbnail-engine
     ports: ['3009:3009']
     volumes:
