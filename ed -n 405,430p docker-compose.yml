@@ -1,0 +1,186 @@
+[1mdiff --git a/docker-compose.yml b/docker-compose.yml[m
+[1mindex 4d24873..ce6d231 100644[m
+[1m--- a/docker-compose.yml[m
+[1m+++ b/docker-compose.yml[m
+[36m@@ -39,6 +39,7 @@[m [mvolumes:[m
+   localization_data:[m
+   cost_data:[m
+   redis_data:[m
+[32m+[m[32m  thumbnail_db_data:[m
+   thumbnail_storage:[m
+ [m
+ # ── Reusable snippets ─────────────────────────────────────────────────────────────────────────────────────────────────[m
+[36m@@ -183,7 +184,7 @@[m [mservices:[m
+       redis:    { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3001/health || exit 1'][m
+ [m
+   script-engine:[m
+     <<: *service[m
+[36m@@ -203,7 +204,7 @@[m [mservices:[m
+       redis:        { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3002/health || exit 1'][m
+ [m
+   voice-engine:[m
+     <<: *service[m
+[36m@@ -223,7 +224,7 @@[m [mservices:[m
+       redis:         { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3003/health || exit 1'][m
+ [m
+   media-engine:[m
+     <<: *service[m
+[36m@@ -245,7 +246,7 @@[m [mservices:[m
+       redis:         { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3004/health || exit 1'][m
+ [m
+   analytics-engine:[m
+     <<: *service[m
+[36m@@ -267,7 +268,7 @@[m [mservices:[m
+       redis:        { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3005/health || exit 1'][m
+ [m
+   community-engine:[m
+     <<: *service[m
+[36m@@ -288,7 +289,7 @@[m [mservices:[m
+       redis:            { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3005/health || exit 1'][m
+ [m
+   localization-engine:[m
+     <<: *service[m
+[36m@@ -309,7 +310,7 @@[m [mservices:[m
+       redis:           { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3007/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3007/health || exit 1'][m
+ [m
+   hook-tester:[m
+     <<: *service[m
+[36m@@ -328,7 +329,7 @@[m [mservices:[m
+       redis:            { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3008/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3008/health || exit 1'][m
+ [m
+   thumbnail-engine:[m
+     <<: *service[m
+[36m@@ -347,11 +348,31 @@[m [mservices:[m
+       REDIS_URL: redis://redis:6379[m
+       STORAGE_BUCKET: ${STORAGE_BUCKET:-ai-pipeline-thumbnails}[m
+       STORAGE_BASE_URL: ${STORAGE_BASE_URL:-}[m
+[32m+[m[32m      DATABASE_URL: postgresql://postgres:postgres@thumbnail-db:5432/thumbnail_engine[m
+     depends_on:[m
+[31m-      redis: { condition: service_healthy }[m
+[31m-    healthcheck:[m
+[32m+[m[32m    depends_on:[m
+[32m+[m[32m      thumbnail-db:[m
+[32m+[m[32m        condition: service_started[m
+[32m+[m[32m      redis:[m
+[32m+[m[32m        condition: service_healthy[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3009/costs/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3009/costs/health || exit 1'][m
+[32m+[m
+[32m+[m[32m  thumbnail-db:[m
+[32m+[m[32m    image: postgres:16-alpine[m
+[32m+[m[32m    container_name: thumbnail-db[m
+[32m+[m[32m    environment:[m
+[32m+[m[32m      POSTGRES_DB: thumbnail_engine[m
+[32m+[m[32m      POSTGRES_USER: postgres[m
+[32m+[m[32m      POSTGRES_PASSWORD: postgres[m
+[32m+[m[32m    volumes:[m
+[32m+[m[32m      - thumbnail_db_data:/var/lib/postgresql/data[m
+[32m+[m[32m    networks: [pipeline][m
+[32m+[m[32m    healthcheck:[m
+[32m+[m[32m      test: ['CMD-SHELL', 'pg_isready -U postgres'][m
+[32m+[m[32m      interval: 5s[m
+[32m+[m[32m      timeout: 5s[m
+[32m+[m[32m      retries: 5[m
+ [m
+   cost-tracker:[m
+     <<: *service[m
+[36m@@ -368,7 +389,7 @@[m [mservices:[m
+       redis:   { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3010/costs/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3010/costs/health || exit 1'][m
+ [m
+   # ═══════════════════════════════════════════════════════════════════[m
+   # API GATEWAY :3100[m
+[36m@@ -393,6 +414,7 @@[m [mservices:[m
+       COST_TRACKER_URL:        http://cost-tracker:3010[m
+       REDIS_URL: redis://redis:6379[m
+     depends_on:[m
+[32m+[m[32m      - thumbnail-db[m
+       topic-engine:        { condition: service_healthy }[m
+       script-engine:       { condition: service_healthy }[m
+       voice-engine:        { condition: service_healthy }[m
+[36m@@ -404,7 +426,7 @@[m [mservices:[m
+       cost-tracker:        { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/health || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3100/health || exit 1'][m
+ [m
+   # ═══════════════════════════════════════════════════════════════════[m
+   # ADMIN UI :3000  (Next.js dashboard)[m
+[36m@@ -427,10 +449,11 @@[m [mservices:[m
+       NEXT_PUBLIC_THUMBNAIL_ENGINE_URL: http://thumbnail-engine:3009[m
+       NEXT_PUBLIC_COST_TRACKER_URL:     http://cost-tracker:3010[m
+     depends_on:[m
+[32m+[m[32m      - thumbnail-db[m
+       api-gateway: { condition: service_healthy }[m
+     healthcheck:[m
+       <<: *svc-health[m
+[31m-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000 || exit 1'][m
+[32m+[m[32m      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3000 || exit 1'][m
+ [m
+   # ═══════════════════════════════════════════════════════════════════[m
+   # TELEGRAM BOT  (no port — uses long-polling)[m
+[36m@@ -448,3 +471,27 @@[m [mservices:[m
+     depends_on:[m
+       api-gateway: { condition: service_healthy }[m
+       redis:       { condition: service_healthy }[m
+[32m+[m
+[32m+[m[32m  thumbnail-db:[m
+[32m+[m[32m    image: postgres:16-alpine[m
+[32m+[m[32m    container_name: thumbnail-engine-db[m
+[32m+[m[32m    environment:[m
+[32m+[m[32m      POSTGRES_DB: thumbnail_engine[m
+[32m+[m[32m      POSTGRES_USER: postgres[m
+[32m+[m[32m      POSTGRES_PASSWORD: postgres[m
+[32m+[m[32m    ports:[m
+[32m+[m[32m      - "5440:5432"[m
+[32m+[m[32m    volumes:[m
+[32m+[m[32m      - thumbnail-db-data:/var/lib/postgresql/data[m
+[32m+[m[32m    healthcheck:[m
+[32m+[m[32m      test: ["CMD-SHELL", "pg_isready -U postgres"][m
+[32m+[m[32m      interval: 10s[m
+[32m+[m[32m      timeout: 5s[m
+[32m+[m[32m      retries: 5[m
+[32m+[m[32m    networks:[m
+[32m+[m[32m      - ai-pipeline[m
+[32m+[m
+[32m+[m
+[32m+[m[32mvolumes:[m
+[32m+[m[32m  thumbnail-db-data:[m
+[41m+[m

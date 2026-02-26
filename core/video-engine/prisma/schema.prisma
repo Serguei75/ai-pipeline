@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model VideoJob {
+  id           String   @id @default(uuid())
+  prompt       String
+  model        String   // "veo-3", "runway-gen3", "mock"
+  status       String   @default("queued") // queued, processing, completed, failed
+  
+  // Generation params
+  duration     Int      @default(10)      // seconds: 5, 10, 15
+  aspectRatio  String   @default("16:9")  // "16:9", "9:16", "1:1"
+  resolution   String   @default("1080p") // "720p", "1080p", "4k"
+  fps          Int      @default(30)      // 24, 30, 60
+  
+  // Results
+  videoUrl     String?
+  thumbnailUrl String?
+  storagePath  String?
+  
+  // Provider info
+  providerJobId String?
+  provider      String   @default("kieai")
+  costUsd       Float    @default(0)
+  
+  // Metadata
+  userId       String?
+  metadata     Json?
+  errorMessage String?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  completedAt  DateTime?
+  
+  @@index([status])
+  @@index([userId])
+  @@index([providerJobId])
+}

@@ -3,7 +3,7 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { handleTopics }      from './handlers/topics';
 import { handleScripts }     from './handlers/scripts';
 import { handleStats }       from './handlers/stats';
-import { handleThumbnails }  from './handlers/thumbnails';
+import { handleThumbnails, startThumbnailPolling }  from './handlers/thumbnails';
 import { handleCosts }       from './handlers/costs';
 import { handleCompetitors } from './handlers/competitors';
 import { EventConsumer }     from './services/events';
@@ -35,7 +35,7 @@ bot.command('start', async (ctx) => {
     .text('📝 Скрипты',    'menu:scripts')
     .row()
     .text('🎨 Обложки',   'menu:thumbnails')
-    .text('💰 Расходы',   'menu:costs')
+    .text('🖼 Создать',   'menu:generate')
     .row()
     .text('🔍 Конкуренты', 'menu:competitors')
     .text('💡 Идеи',       'menu:ideas')
@@ -48,6 +48,7 @@ bot.command('start', async (ctx) => {
     `📌 /topics — темы на одобрение\n` +
     `📝 /scripts — скрипты на одобрение\n` +
     `🎨 /thumbnails — последние обложки\n` +
+    `🖼 /generate — создать обложку (Kie.ai)\n` +
     `🔬 /ab\_tests — A/B тесты обложек\n` +
     `💰 /costs — расходы API\n` +
     `🔍 /competitors — отслеживаемые каналы\n` +
@@ -56,6 +57,18 @@ bot.command('start', async (ctx) => {
     `📊 /stats — статус сервисов`,
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
+});
+
+// ── /generate — создать thumbnail ─────────────────────────────────────
+bot.command('generate', handleThumbnails.generate);
+
+// ── /cancel — отменить генерацию ──────────────────────────────────────
+bot.command('cancel', async (ctx) => {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return;
+  
+  // Clear any pending state (implementation depends on your state management)
+  await ctx.reply('❌ Генерация отменена');
 });
 
 // ── /help ───────────────────────────────────────────────────────────────
@@ -100,6 +113,7 @@ bot.callbackQuery('menu:topics',      async (ctx) => { await ctx.answerCallbackQ
 bot.callbackQuery('menu:scripts',     async (ctx) => { await ctx.answerCallbackQuery(); await handleScripts.list(ctx); });
 bot.callbackQuery('menu:stats',       async (ctx) => { await ctx.answerCallbackQuery(); await handleStats.show(ctx); });
 bot.callbackQuery('menu:thumbnails',  async (ctx) => { await ctx.answerCallbackQuery(); await handleThumbnails.list(ctx); });
+bot.callbackQuery('menu:generate',    async (ctx) => { await ctx.answerCallbackQuery(); await handleThumbnails.generate(ctx); });
 bot.callbackQuery('menu:costs',       async (ctx) => { await ctx.answerCallbackQuery(); await handleCosts.show(ctx); });
 bot.callbackQuery('menu:competitors', async (ctx) => { await ctx.answerCallbackQuery(); await handleCompetitors.list(ctx); });
 bot.callbackQuery('menu:ideas',       async (ctx) => { await ctx.answerCallbackQuery(); await handleCompetitors.ideas(ctx); });
@@ -118,6 +132,9 @@ bot.callbackQuery(/^idea:reject:(.+)$/,    handleCompetitors.callbackReject);
 // ── Event Bus consumer ──────────────────────────────────────────────────────
 const consumer = new EventConsumer(bot);
 consumer.start().catch(e => console.warn('Event consumer failed to start:', e));
+
+// ── Thumbnail polling ───────────────────────────────────────────────────────
+startThumbnailPolling(bot);
 
 // ── Errors & Signals ───────────────────────────────────────────────────────
 bot.catch(err => console.error('Bot error:', err.error));

@@ -7,7 +7,7 @@
  *   get_budget_alerts   — services approaching budget limits
  */
 
-import type { McpTool } from '../../shared/mcp/src'
+import type { McpTool } from '../../shared/mcp/src/index.js'
 
 const BASE = `http://localhost:${process.env.PORT ?? 3010}`
 const j = (r: Response) => r.json()

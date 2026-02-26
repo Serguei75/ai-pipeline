@@ -1,5 +1,5 @@
-import Redis from 'ioredis';
-import { getPrisma } from './prisma';
+import { Redis } from 'ioredis';
+import { getPrisma } from './prisma.js';
 
 const STREAM_KEY = 'ai-pipeline:events';
 const CONSUMER_GROUP = 'cost-tracker';

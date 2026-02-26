@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { getPrisma } from '../services/prisma';
+import { getPrisma } from '../services/prisma.js';
 
 export async function costRoutes(app: FastifyInstance): Promise<void> {
 

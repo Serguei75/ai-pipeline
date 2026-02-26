@@ -3,9 +3,9 @@ import { randomUUID } from 'crypto';
 import { config } from '../config.js';
 import type { CostEvent, CostCategory, CostProvider, VideoCostBreakdown, ChannelCostSummary } from '../types.js';
 import { UNIT_PRICING } from '../types.js';
-import pino from 'pino';
+import * as pino from 'pino';
 
-const logger = pino({ level: 'info' });
+const logger = pino.default({ level: 'info' });
 
 let pool: Pool | null = null;
 function getPool(): Pool {

@@ -1,10 +1,11 @@
 import Fastify from 'fastify';
 import { config } from './config.js';
 import { costRoutes } from './routes/cost.routes.js';
+import { healthRoutes } from './routes/health.js';
 import { CostEventConsumer } from './services/event-consumer.js';
-import pino from 'pino';
+import * as pino from 'pino';
 
-const logger = pino({
+const logger = pino.default({
   level: 'info',
   ...(config.NODE_ENV === 'development' && {
     transport: { target: 'pino-pretty', options: { colorize: true } },
@@ -15,6 +16,7 @@ const app = Fastify({ logger: false });
 const consumer = new CostEventConsumer();
 
 await app.register(costRoutes);
+await app.register(healthRoutes);
 
 // Start Event Bus consumer
 await consumer.start().catch((err) => {

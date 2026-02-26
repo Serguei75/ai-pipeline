@@ -1,4 +1,4 @@
-import { IProvider, ProviderConfig, Provider } from '../types';
+import type { IProvider, ProviderConfig, Provider } from '../types.js';
 
 export class MockProvider implements IProvider {
   name: Provider = 'MOCK';

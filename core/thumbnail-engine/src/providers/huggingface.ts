@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { IProvider, ProviderConfig, Provider } from '../types';
+import type { IProvider, ProviderConfig, Provider } from '../types.js';
 
 const DEFAULT_MODEL = process.env.HUGGINGFACE_MODEL || 'black-forest-labs/FLUX.1-schnell';
 const API_BASE = 'https://api-inference.huggingface.co/models';

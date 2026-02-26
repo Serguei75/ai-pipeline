@@ -9,9 +9,9 @@
 import { createClient } from 'redis';
 import { config } from '../config.js';
 import { recordCostEvent, updateVideoRevenue } from './cost.service.js';
-import pino from 'pino';
+import * as pino from 'pino';
 
-const logger = pino({ level: 'info' });
+const logger = pino.default({ level: 'info' });
 
 type StreamResult = { name: string; messages: Array<{ id: string; message: Record<string, string> }> };
 

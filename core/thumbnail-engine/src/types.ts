@@ -59,4 +59,17 @@ export interface ProviderConfig {
   maxVariantsPerCall: number;
   supportsBatch: boolean;
   avgEloScore: number;
+  width?: number;
+  height?: number;
+}
+
+export type Provider = 'HUGGINGFACE' | 'CLOUDFLARE' | 'MOCK' | 'FAL' | 'KIEAI';
+
+export interface IProvider {
+  name: Provider;
+  generate(prompt: string, config: ProviderConfig, negativePrompt?: string): Promise<{
+    imageBuffer: Buffer;
+    model: string;
+    costUsd: number;
+  }>;
 }

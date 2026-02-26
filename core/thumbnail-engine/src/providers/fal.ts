@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { IProvider, ProviderConfig, Provider } from '../types';
+import type { IProvider, ProviderConfig, Provider } from '../types.js';
 
 const DEFAULT_MODEL = process.env.FAL_MODEL || 'fal-ai/flux/schnell';
 

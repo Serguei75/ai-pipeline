@@ -6,6 +6,7 @@ const envSchema = z.object({
   PORT: z.string().default('3009'),
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required for Imagen 4'),
   OPENAI_API_KEY: z.string().optional(),
+  KIEAI_API_KEY: z.string().optional(),
   STORAGE_BUCKET: z.string().default('ai-pipeline-thumbnails'),
   STORAGE_BASE_URL: z.string().url().optional(),
   DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/ai_pipeline'),
@@ -67,3 +68,9 @@ export function selectProvider(draft: boolean, useAbTest: boolean): ImageProvide
   if (useAbTest) return 'gpt-image-1.5'; // highest Elo for A/B winner
   return 'imagen4-standard';              // default prod quality
 }
+
+export const FALLBACK_PROVIDERS: string[] = [
+  'huggingface',  // Free tier
+  'cloudflare',   // Free tier
+  'mock'          // Fallback
+];

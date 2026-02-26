@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { costRoutes } from './routes/costs';
-import { healthRoutes } from './routes/health';
-import { CostConsumer } from './services/consumer';
-import { disconnectPrisma } from './services/prisma';
+import { costRoutes } from './routes/costs.js';
+import { healthRoutes } from './routes/health.js';
+import { CostConsumer } from './services/consumer.js';
+import { disconnectPrisma } from './services/prisma.js';
 
 const app = Fastify({
   logger: { level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' },

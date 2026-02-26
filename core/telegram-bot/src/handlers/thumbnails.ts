@@ -1,6 +1,8 @@
-import { Context, InlineKeyboard } from 'grammy';
+import { Context } from 'grammy';
+import axios from 'axios';
 
 const GW = process.env.GATEWAY_URL || 'http://localhost:3100';
+const THUMBNAIL_ENGINE = process.env.THUMBNAIL_ENGINE_URL || 'http://thumbnail-engine:3009';
 
 const HOOK_INFO: Record<string, string> = {
   fear: '🚨 Fear', curiosity: '🤔 Curiosity',
@@ -8,7 +10,28 @@ const HOOK_INFO: Record<string, string> = {
   social_proof: '🔥 Social Proof',
 };
 
+// Store pending generation tasks: chatId -> taskId
+const pendingTasks = new Map<number, string>();
+
 export const handleThumbnails = {
+  // Генерация thumbnail через Kie.ai
+  generate: async (ctx: Context) => {
+    const chatId = ctx.chat?.id;
+    if (!chatId) return;
+
+    await ctx.reply(
+      '🎨 *Создание Thumbnail*\n\n' +
+      'Отправь промпт для генерации (на английском):\n\n' +
+      '_Пример: "YouTube thumbnail with AI text and glowing effects"_',
+      { parse_mode: 'Markdown' }
+    );
+
+    // Register command handler for prompt
+    ctx.api.setMyCommands([
+      { command: '/cancel', description: 'Отменить генерацию' }
+    ]);
+  },
+
   // /thumbnails — последние обложки
   list: async (ctx: Context) => {
     try {
@@ -77,3 +100,52 @@ export const handleThumbnails = {
     }
   },
 };
+
+/**
+ * Start polling for thumbnail generation tasks
+ */
+export async function startThumbnailPolling(bot: any) {
+  setInterval(async () => {
+    for (const [chatId, taskId] of pendingTasks.entries()) {
+      try {
+        const res = await axios.get(`${THUMBNAIL_ENGINE}/thumbnails/status/${taskId}`);
+        const result = res.data;
+
+        if (result.status === 'completed') {
+          // Send all variants
+          for (const variant of result.variants || []) {
+            if (variant.storagePath) {
+              const photoUrl = `${THUMBNAIL_ENGINE}/static/${variant.storagePath}`;
+              await bot.api.sendPhoto(chatId, photoUrl, {
+                caption: `✅ Вариант ${variant.id}\n\nProvider: ${variant.provider}\n\n_${variant.prompt.slice(0, 200)}..._`,
+                parse_mode: 'Markdown'
+              });
+            }
+          }
+
+          await bot.api.sendMessage(chatId, `✅ Генерация завершена! ${result.variants?.length || 0} вариантов.`);
+          pendingTasks.delete(chatId);
+        } else if (result.status === 'failed') {
+          await bot.api.sendMessage(chatId, `❌ Генерация не удалась: ${taskId}`);
+          pendingTasks.delete(chatId);
+        }
+      } catch (error: any) {
+        console.error(`Error checking task ${taskId}:`, error.message);
+      }
+    }
+  }, 3000); // Check every 3 seconds
+}
+
+/**
+ * Check if chat has pending task
+ */
+export function hasPendingTask(chatId: number): boolean {
+  return pendingTasks.has(chatId);
+}
+
+/**
+ * Add pending task
+ */
+export function addPendingTask(chatId: number, taskId: string): void {
+  pendingTasks.set(chatId, taskId);
+}

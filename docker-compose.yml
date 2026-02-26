@@ -1,5 +1,5 @@
 # AI Pipeline — Full System Orchestration
-# 14 services · 8 PostgreSQL databases · Redis Event Bus
+# 15 services · 9 PostgreSQL databases · Redis Event Bus
 #
 # Quick start:
 #   cp .env.example .env   # fill in API keys
@@ -21,6 +21,7 @@
 #   :3008  hook-tester
 #   :3009  thumbnail-engine  (Imagen 4 Fast/Std/Ultra + GPT Image 1.5)
 #   :3010  cost-tracker      (real-time P&L per video)
+#   :3011  video-engine      (Veo 3 / Runway Gen-3 via Kie.ai)
 #   :3100  api-gateway
 #   :6379  redis             (Event Bus)
 #   —      telegram-bot      (push notifications + approve/reject)
@@ -40,6 +41,8 @@ volumes:
   cost_data:
   redis_data:
   thumbnail_storage:
+  thumbnail_db_data:
+  video_data:
 
 # ── Reusable snippets ─────────────────────────────────────────────────────────────────────────────────────────────────
 x-service: &service
@@ -344,14 +347,69 @@ services:
       PORT: '3009'
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      KIEAI_API_KEY: ${KIEAI_API_KEY:-}
+      KIEAI_BASE_URL: ${KIEAI_BASE_URL:-https://api.kie.ai/v1}
+      KIEAI_WEBHOOK_SECRET: ${KIEAI_WEBHOOK_SECRET:-}
+      KIEAI_WEBHOOK_URL: ${KIEAI_WEBHOOK_URL:-}
       REDIS_URL: redis://redis:6379
       STORAGE_BUCKET: ${STORAGE_BUCKET:-ai-pipeline-thumbnails}
       STORAGE_BASE_URL: ${STORAGE_BASE_URL:-}
+      DATABASE_URL: postgresql://postgres:postgres@thumbnail-db:5432/thumbnail_engine
     depends_on:
+      redis: { condition: service_healthy }
+      thumbnail-db: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3009/health || exit 1']
+
+  thumbnail-db:
+    image: postgres:16-alpine
+    container_name: thumbnail-db
+    environment:
+      POSTGRES_DB: thumbnail_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - thumbnail_db_data:/var/lib/postgresql/data
+    networks: [pipeline]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  video-db:
+    image: postgres:16-alpine
+    container_name: video-db
+    ports: ['5440:5432']
+    environment:
+      POSTGRES_DB: video_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - video_data:/var/lib/postgresql/data
+    networks: [pipeline]
+    healthcheck:
+      <<: *pg-health
+
+  video-engine:
+    <<: *service
+    build: { context: ./core/video-engine, dockerfile: Dockerfile }
+    container_name: video-engine
+    ports: ['3011:3011']
+    environment:
+      NODE_ENV: production
+      PORT: '3011'
+      KIEAI_API_KEY: ${KIEAI_API_KEY}
+      KIEAI_BASE_URL: ${KIEAI_BASE_URL:-https://api.kie.ai}
+      KIEAI_WEBHOOK_SECRET: ${KIEAI_WEBHOOK_SECRET:-}
+      DATABASE_URL: postgresql://postgres:postgres@video-db:5432/video_engine
+    depends_on:
+      video-db: { condition: service_healthy }
       redis: { condition: service_healthy }
     healthcheck:
       <<: *svc-health
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3009/costs/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3011/api/videos/health || exit 1']
 
   cost-tracker:
     <<: *service
@@ -368,7 +426,7 @@ services:
       redis:   { condition: service_healthy }
     healthcheck:
       <<: *svc-health
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3010/costs/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://0.0.0.0:3010/health || exit 1']
 
   # ═══════════════════════════════════════════════════════════════════
   # API GATEWAY :3100
@@ -444,7 +502,9 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID}
       API_GATEWAY_URL: http://api-gateway:3100
+      THUMBNAIL_ENGINE_URL: http://thumbnail-engine:3009
       REDIS_URL: redis://redis:6379
     depends_on:
       api-gateway: { condition: service_healthy }
       redis:       { condition: service_healthy }
+      thumbnail-engine: { condition: service_healthy }
