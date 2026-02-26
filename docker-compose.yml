@@ -288,7 +288,7 @@ services:
       redis:            { condition: service_healthy }
     healthcheck:
       <<: *svc-health
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3006/health || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1']
 
   localization-engine:
     <<: *service
