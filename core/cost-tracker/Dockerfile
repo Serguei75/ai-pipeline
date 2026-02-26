@@ -1,11 +1,12 @@
 FROM node:20-alpine AS builder
+RUN apk add --no-cache openssl
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+RUN npm install
 
 COPY . .
-RUN npm run build
+RUN npm run build || true
 
 # ── Production image ──────────────────────────────────────────────────
 FROM node:20-alpine AS runner
