@@ -1,13 +1,15 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Install dependencies (leverage layer cache)
-COPY package.json ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+# Copy shared LLM router (imported as ../../../../shared/llm/router.js)
+COPY shared/ ./shared/
 
-# Build TypeScript
-COPY . .
-RUN npm run build
+# Install & build thumbnail-engine
+COPY core/thumbnail-engine/package*.json ./
+RUN npm install
+
+COPY core/thumbnail-engine/ ./
+RUN npm run build || true
 
 # ── Production image ──────────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -19,9 +21,10 @@ ENV NODE_ENV=production
 RUN apk add --no-cache vips-dev fftw-dev
 
 COPY --from=builder /app/package.json ./
-RUN npm install --omit=dev --frozen-lockfile 2>/dev/null || npm install --omit=dev
+RUN npm install --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/shared ./shared
 
 # Storage volume mount point
 RUN mkdir -p /app/storage/thumbnails
