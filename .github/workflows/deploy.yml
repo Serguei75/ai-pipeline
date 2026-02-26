@@ -1,0 +1,89 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# DEPLOY — SSH into Oracle Cloud VPS, pull images, restart compose
+# Triggers: after publish.yml succeeds on main
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   VPS_HOST        — Oracle VPS public IP (e.g. 152.70.123.45)
+#   VPS_USER        — SSH user (default: ubuntu)
+#   VPS_SSH_KEY     — Private SSH key (PEM format, the one from Oracle)
+#   VPS_DEPLOY_PATH — Absolute path on VPS (e.g. /home/ubuntu/ai-pipeline)
+#
+# Optional (for Telegram deploy notifications):
+#   TELEGRAM_BOT_TOKEN
+#   TELEGRAM_ALLOWED_USER_ID
+# ══════════════════════════════════════════════════════════════════════════════
+name: Deploy to VPS
+
+on:
+  workflow_run:
+    workflows: ['Publish Docker Images']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:   # manual trigger
+
+jobs:
+  deploy:
+    name: Deploy → Oracle Cloud VPS
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout (for compose files)
+        uses: actions/checkout@v4
+
+      # ── Copy docker-compose.prod.yml and .env.example to VPS ────────────
+      - name: Upload compose files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key:      ${{ secrets.VPS_SSH_KEY }}
+          source:   'docker-compose.prod.yml,.env.example'
+          target:   ${{ secrets.VPS_DEPLOY_PATH }}
+          overwrite: true
+
+      # ── SSH: pull new images + rolling restart ───────────────────────────
+      - name: SSH Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key:      ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.VPS_DEPLOY_PATH }}
+
+            echo "=== Logging into GHCR ==="
+            echo "${{ secrets.GITHUB_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin || \
+            echo "Using existing GHCR session"
+
+            echo "=== Pulling latest images ==="
+            docker compose -f docker-compose.prod.yml pull
+
+            echo "=== Rolling restart (no downtime for stateless services) ==="
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            echo "=== Pruning old images ==="
+            docker image prune -f
+
+            echo "=== Health check ==="
+            sleep 15
+            docker compose -f docker-compose.prod.yml ps
+
+            echo "=== API Gateway health ==="
+            curl -sf http://localhost:3100/health && echo " ✅ API Gateway OK" || echo " ⚠️  API Gateway not ready yet"
+
+      # ── Notify Telegram ──────────────────────────────────────────────────
+      - name: Notify Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_ALLOWED_USER_ID }}
+        run: |
+          STATUS=$([ "${{ job.status }}" == "success" ] && echo "🚀 Deployed" || echo "💥 Deploy FAILED")
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          MESSAGE="${STATUS} to Oracle Cloud VPS%0Acommit: ${SHA_SHORT}%0Abranch: main"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="${MESSAGE}" || true

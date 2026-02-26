@@ -1,0 +1,448 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AI Pipeline — PRODUCTION Compose
+# Uses pre-built images from GHCR (no local build: context needed on VPS)
+#
+# Quick start on VPS:
+#   cp .env.example .env && nano .env   # fill in real API keys
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Image source: ghcr.io/serguei75/ai-pipeline/<service>:latest
+# Updated automatically by GitHub Actions on every push to main
+# ══════════════════════════════════════════════════════════════════════════════
+
+version: '3.9'
+
+networks:
+  pipeline:
+    driver: bridge
+
+volumes:
+  topic_data:
+  script_data:
+  voice_data:
+  media_data:
+  analytics_data:
+  community_data:
+  localization_data:
+  cost_data:
+  redis_data:
+  thumbnail_storage:
+
+# ── Reusable snippets ─────────────────────────────────────────────────────────
+x-service: &service
+  restart: unless-stopped
+  networks: [pipeline]
+  logging:
+    driver: 'json-file'
+    options:
+      max-size: '10m'
+      max-file: '3'
+
+x-pg-health: &pg-health
+  test: ['CMD-SHELL', 'pg_isready -U postgres']
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 15s
+
+x-svc-health: &svc-health
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+x-llm-env: &llm-env
+  GEMINI_API_KEY: ${GEMINI_API_KEY}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+
+x-tts-env: &tts-env
+  HF_TOKEN: ${HF_TOKEN:-}
+  GOOGLE_TTS_API_KEY: ${GOOGLE_TTS_API_KEY:-}
+  FISH_AUDIO_API_KEY: ${FISH_AUDIO_API_KEY:-}
+  RESEMBLE_API_KEY: ${RESEMBLE_API_KEY:-}
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════
+  # INFRASTRUCTURE
+  # ═══════════════════════════════════════════════════════════════════
+  redis:
+    <<: *service
+    image: redis:7-alpine
+    container_name: ai-pipeline-redis
+    command: redis-server --maxmemory 1gb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ═══════════════════════════════════════════════════════════════════
+  # DATABASES
+  # ═══════════════════════════════════════════════════════════════════
+  topic-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: topic-engine-db
+    environment: { POSTGRES_DB: topic_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [topic_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  script-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: script-engine-db
+    environment: { POSTGRES_DB: script_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [script_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  voice-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: voice-engine-db
+    environment: { POSTGRES_DB: voice_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [voice_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  media-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: media-engine-db
+    environment: { POSTGRES_DB: media_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [media_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  analytics-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: analytics-engine-db
+    environment: { POSTGRES_DB: analytics_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [analytics_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  community-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: community-engine-db
+    environment: { POSTGRES_DB: community_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [community_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  localization-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: localization-engine-db
+    environment: { POSTGRES_DB: localization_engine, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [localization_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  cost-db:
+    <<: *service
+    image: postgres:16-alpine
+    container_name: cost-tracker-db
+    environment: { POSTGRES_DB: cost_tracker, POSTGRES_USER: postgres, POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}' }
+    volumes: [cost_data:/var/lib/postgresql/data]
+    healthcheck: *pg-health
+
+  # ═══════════════════════════════════════════════════════════════════
+  # CORE MICROSERVICES (images from GHCR)
+  # ═══════════════════════════════════════════════════════════════════
+  topic-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/topic-engine:latest
+    container_name: topic-engine
+    ports: ['3001:3001']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3001'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@topic-db:5432/topic_engine
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      topic-db: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
+
+  script-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/script-engine:latest
+    container_name: script-engine
+    ports: ['3002:3002']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3002'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@script-db:5432/script_engine
+      REDIS_URL: redis://redis:6379
+      TOPIC_ENGINE_URL: http://topic-engine:3001
+    depends_on:
+      script-db:    { condition: service_healthy }
+      topic-engine: { condition: service_healthy }
+      redis:        { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
+
+  voice-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/voice-engine:latest
+    container_name: voice-engine
+    ports: ['3003:3003']
+    environment:
+      <<: *tts-env
+      NODE_ENV: production
+      PORT: '3003'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@voice-db:5432/voice_engine
+      REDIS_URL: redis://redis:6379
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+    depends_on:
+      voice-db:      { condition: service_healthy }
+      script-engine: { condition: service_healthy }
+      redis:         { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1']
+
+  media-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/media-engine:latest
+    container_name: media-engine
+    ports: ['3004:3004']
+    environment:
+      NODE_ENV: production
+      PORT: '3004'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@media-db:5432/media_engine
+      REDIS_URL: redis://redis:6379
+      HEYGEN_API_KEY: ${HEYGEN_API_KEY}
+      PEXELS_API_KEY: ${PEXELS_API_KEY}
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+      VOICE_ENGINE_URL:  http://voice-engine:3003
+    depends_on:
+      media-db:      { condition: service_healthy }
+      voice-engine:  { condition: service_healthy }
+      redis:         { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1']
+
+  analytics-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/analytics-engine:latest
+    container_name: analytics-engine
+    ports: ['3005:3005']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3005'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@analytics-db:5432/analytics_engine
+      REDIS_URL: redis://redis:6379
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      YOUTUBE_OAUTH_CLIENT_ID:     ${YOUTUBE_OAUTH_CLIENT_ID:-}
+      YOUTUBE_OAUTH_CLIENT_SECRET: ${YOUTUBE_OAUTH_CLIENT_SECRET:-}
+      YOUTUBE_REFRESH_TOKEN:       ${YOUTUBE_REFRESH_TOKEN:-}
+    depends_on:
+      analytics-db: { condition: service_healthy }
+      redis:        { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3005/health || exit 1']
+
+  community-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/community-engine:latest
+    container_name: community-engine
+    ports: ['3006:3006']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3006'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@community-db:5432/community_engine
+      REDIS_URL: redis://redis:6379
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      ANALYTICS_ENGINE_URL: http://analytics-engine:3005
+    depends_on:
+      community-db:     { condition: service_healthy }
+      analytics-engine: { condition: service_healthy }
+      redis:            { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3006/health || exit 1']
+
+  localization-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/localization-engine:latest
+    container_name: localization-engine
+    ports: ['3007:3007']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3007'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@localization-db:5432/localization_engine
+      REDIS_URL: redis://redis:6379
+      SCRIPT_ENGINE_URL: http://script-engine:3002
+      MEDIA_ENGINE_URL:  http://media-engine:3004
+    depends_on:
+      localization-db: { condition: service_healthy }
+      script-engine:   { condition: service_healthy }
+      redis:           { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3007/health || exit 1']
+
+  hook-tester:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/hook-tester:latest
+    container_name: hook-tester
+    ports: ['3008:3008']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3008'
+      REDIS_URL: redis://redis:6379
+      ANALYTICS_ENGINE_URL: http://analytics-engine:3005
+      SCRIPT_ENGINE_URL:    http://script-engine:3002
+    depends_on:
+      analytics-engine: { condition: service_healthy }
+      redis:            { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3008/health || exit 1']
+
+  thumbnail-engine:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/thumbnail-engine:latest
+    container_name: thumbnail-engine
+    ports: ['3009:3009']
+    volumes: [thumbnail_storage:/app/storage]
+    environment:
+      NODE_ENV: production
+      PORT: '3009'
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      REDIS_URL: redis://redis:6379
+      STORAGE_BUCKET:   ${STORAGE_BUCKET:-ai-pipeline-thumbnails}
+      STORAGE_BASE_URL: ${STORAGE_BASE_URL:-}
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3009/costs/health || exit 1']
+
+  cost-tracker:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/cost-tracker:latest
+    container_name: cost-tracker
+    ports: ['3010:3010']
+    environment:
+      NODE_ENV: production
+      PORT: '3010'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@cost-db:5432/cost_tracker
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      cost-db: { condition: service_healthy }
+      redis:   { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3010/costs/health || exit 1']
+
+  competitor-intelligence:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/competitor-intelligence:latest
+    container_name: competitor-intelligence
+    ports: ['3011:3011']
+    environment:
+      <<: *llm-env
+      NODE_ENV: production
+      PORT: '3011'
+      REDIS_URL: redis://redis:6379
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3011/health || exit 1']
+
+  # ═══════════════════════════════════════════════════════════════════
+  # API GATEWAY :3100
+  # ═══════════════════════════════════════════════════════════════════
+  api-gateway:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/api-gateway:latest
+    container_name: api-gateway
+    ports: ['3100:3100']
+    environment:
+      NODE_ENV: production
+      PORT: '3100'
+      TOPIC_ENGINE_URL:              http://topic-engine:3001
+      SCRIPT_ENGINE_URL:             http://script-engine:3002
+      VOICE_ENGINE_URL:              http://voice-engine:3003
+      MEDIA_ENGINE_URL:              http://media-engine:3004
+      ANALYTICS_ENGINE_URL:          http://analytics-engine:3005
+      COMMUNITY_ENGINE_URL:          http://community-engine:3006
+      LOCALIZATION_ENGINE_URL:       http://localization-engine:3007
+      HOOK_TESTER_URL:               http://hook-tester:3008
+      THUMBNAIL_ENGINE_URL:          http://thumbnail-engine:3009
+      COST_TRACKER_URL:              http://cost-tracker:3010
+      COMPETITOR_INTELLIGENCE_URL:   http://competitor-intelligence:3011
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      topic-engine:           { condition: service_healthy }
+      script-engine:          { condition: service_healthy }
+      voice-engine:           { condition: service_healthy }
+      media-engine:           { condition: service_healthy }
+      analytics-engine:       { condition: service_healthy }
+      community-engine:       { condition: service_healthy }
+      localization-engine:    { condition: service_healthy }
+      thumbnail-engine:       { condition: service_healthy }
+      cost-tracker:           { condition: service_healthy }
+      competitor-intelligence: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/health || exit 1']
+
+  # ═══════════════════════════════════════════════════════════════════
+  # ADMIN UI :3000
+  # ═══════════════════════════════════════════════════════════════════
+  admin-ui:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/admin-ui:latest
+    container_name: admin-ui
+    ports: ['3000:3000']
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_GATEWAY_URL:       ${API_GATEWAY_URL:-http://localhost:3100}
+      NEXT_PUBLIC_TOPIC_ENGINE_URL:      http://topic-engine:3001
+      NEXT_PUBLIC_SCRIPT_ENGINE_URL:     http://script-engine:3002
+      NEXT_PUBLIC_VOICE_ENGINE_URL:      http://voice-engine:3003
+      NEXT_PUBLIC_MEDIA_ENGINE_URL:      http://media-engine:3004
+      NEXT_PUBLIC_ANALYTICS_ENGINE_URL:  http://analytics-engine:3005
+      NEXT_PUBLIC_COMMUNITY_ENGINE_URL:  http://community-engine:3006
+      NEXT_PUBLIC_LOCALIZATION_URL:      http://localization-engine:3007
+      NEXT_PUBLIC_THUMBNAIL_ENGINE_URL:  http://thumbnail-engine:3009
+      NEXT_PUBLIC_COST_TRACKER_URL:      http://cost-tracker:3010
+    depends_on:
+      api-gateway: { condition: service_healthy }
+    healthcheck:
+      <<: *svc-health
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000 || exit 1']
+
+  # ═══════════════════════════════════════════════════════════════════
+  # TELEGRAM BOT (long-polling, no exposed port)
+  # ═══════════════════════════════════════════════════════════════════
+  telegram-bot:
+    <<: *service
+    image: ghcr.io/serguei75/ai-pipeline/telegram-bot:latest
+    container_name: ai-pipeline-telegram-bot
+    environment:
+      NODE_ENV: production
+      TELEGRAM_BOT_TOKEN:        ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOWED_USER_ID:  ${TELEGRAM_ALLOWED_USER_ID}
+      API_GATEWAY_URL: http://api-gateway:3100
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      api-gateway: { condition: service_healthy }
+      redis:       { condition: service_healthy }
