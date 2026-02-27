@@ -1,3 +1,5 @@
+import { AIMLAPIProvider } from './aimlapi.provider.js';
+import { FalAIProvider } from './fal.provider.js';
 import { KieAIVeoProvider } from './kieai-veo.provider.js';
 import { MockVideoProvider } from './mock.provider.js';
 import pino from 'pino';
@@ -6,8 +8,8 @@ const logger = pino({ level: 'info' });
 
 interface VideoGenerationRequest {
   prompt: string;
-  model?: 'veo3' | 'veo3_fast' | 'mock';
-  duration?: 5 | 10 | 15;
+  model?: string;
+  duration?: number;
   aspectRatio?: '16:9' | '9:16';
   userId?: string;
 }
@@ -21,92 +23,150 @@ interface VideoGenerationResult {
   duration?: number;
   costUsd?: number;
   estimatedTime?: number;
+  provider?: string;
+  tier?: 'free' | 'paid';
 }
 
 export class VideoService {
-  private kieaiProvider?: KieAIVeoProvider;
-  private mockProvider: MockVideoProvider;
+  private providers: Array<{
+    name: string;
+    instance: any;
+    enabled: boolean;
+    tier: 'free' | 'paid';
+  }> = [];
 
   constructor() {
-    const apiKey = process.env.KIEAI_API_KEY;
-
-    if (apiKey) {
-      this.kieaiProvider = new KieAIVeoProvider({
-        apiKey,
-        baseUrl: process.env.KIEAI_BASE_URL || 'https://api.kie.ai',
-        webhookUrl: process.env.KIEAI_WEBHOOK_URL,
+    // Priority 1: AIMLAPI (FREE 10 min/месяц)
+    if (process.env.AIMLAPI_API_KEY) {
+      this.providers.push({
+        name: 'AIMLAPI',
+        instance: new AIMLAPIProvider({ apiKey: process.env.AIMLAPI_API_KEY }),
+        enabled: true,
+        tier: 'free',
       });
-      logger.info('KieAI Veo provider initialized');
+      logger.info('✅ AIMLAPI provider loaded (FREE 10 min/month)');
     } else {
-      logger.warn('KIEAI_API_KEY not found, using Mock provider only');
+      logger.warn('⚠️ AIMLAPI_API_KEY not set, skipping FREE tier');
     }
 
-    this.mockProvider = new MockVideoProvider();
+    // Priority 2: Fal.ai (FREE $10-20 credits)
+    if (process.env.FALAI_API_KEY) {
+      this.providers.push({
+        name: 'FalAI',
+        instance: new FalAIProvider({ apiKey: process.env.FALAI_API_KEY }),
+        enabled: true,
+        tier: 'free',
+      });
+      logger.info('✅ Fal.ai provider loaded (FREE $10-20 credits)');
+    } else {
+      logger.warn('⚠️ FALAI_API_KEY not set, skipping FREE tier');
+    }
+
+    // Priority 3: Kie.ai (PAID)
+    if (process.env.KIEAI_API_KEY) {
+      this.providers.push({
+        name: 'KieAI',
+        instance: new KieAIVeoProvider({
+          apiKey: process.env.KIEAI_API_KEY,
+          baseUrl: process.env.KIEAI_BASE_URL || 'https://api.kie.ai',
+          webhookUrl: process.env.KIEAI_WEBHOOK_URL,
+        }),
+        enabled: true,
+        tier: 'paid',
+      });
+      logger.info('✅ Kie.ai provider loaded (PAID)');
+    } else {
+      logger.warn('⚠️ KIEAI_API_KEY not set, skipping PAID tier');
+    }
+
+    // Fallback: Mock (всегда доступен)
+    this.providers.push({
+      name: 'Mock',
+      instance: new MockVideoProvider(),
+      enabled: true,
+      tier: 'free',
+    });
+    logger.info('✅ Mock provider loaded (always available)');
+
+    logger.info(`📦 Total providers loaded: ${this.providers.length}`);
+    logger.info(`📊 Provider chain: ${this.providers.map(p => `${p.name}(${p.tier})`).join(' → ')}`);
   }
 
   async generateVideo(request: VideoGenerationRequest): Promise<VideoGenerationResult> {
-    const useMock = request.model === 'mock' || !this.kieaiProvider;
+    // Пробуем провайдеры по порядку (FREE → PAID → Mock)
+    for (const provider of this.providers) {
+      if (!provider.enabled) continue;
 
-    if (useMock) {
-      logger.info({ prompt: request.prompt }, 'Using Mock provider');
-      const result = await this.mockProvider.generateVideo({
-        prompt: request.prompt,
-        duration: request.duration || 10,
-      });
-      return {
-        jobId: result.id,
-        providerJobId: result.id,
-        status: result.status,
-        videoUrl: result.videoUrl,
-        thumbnailUrl: result.thumbnailUrl,
-        duration: result.duration,
-        costUsd: result.costUsd,
-      };
+      try {
+        logger.info(
+          { provider: provider.name, tier: provider.tier, prompt: request.prompt.slice(0, 50) },
+          `Attempting video generation`
+        );
+
+        const result = await provider.instance.generateVideo({
+          prompt: request.prompt,
+          duration: request.duration,
+          aspectRatio: request.aspectRatio,
+          model: request.model,
+        });
+
+        logger.info(
+          { provider: provider.name, taskId: result.taskId, tier: provider.tier },
+          `✅ Video generation started`
+        );
+
+        return {
+          jobId: result.taskId,
+          providerJobId: result.taskId,
+          status: result.status,
+          videoUrl: result.videoUrl,
+          estimatedTime: result.estimatedTime,
+          provider: provider.name,
+          tier: provider.tier,
+          costUsd: provider.tier === 'free' ? 0 : 0.15,
+          duration: request.duration || 10,
+        };
+      } catch (error: any) {
+        // Если лимит исчерпан - пробуем следующий провайдер
+        if (error.message.includes('LIMIT_EXCEEDED')) {
+          logger.warn(
+            { provider: provider.name, tier: provider.tier },
+            `⚠️ Free tier limit exceeded, trying next provider`
+          );
+          continue;
+        }
+
+        // Другие ошибки - тоже пробуем следующий
+        logger.error(
+          { provider: provider.name, error: error.message },
+          `❌ Provider failed, trying next`
+        );
+        continue;
+      }
     }
 
-    logger.info({ prompt: request.prompt, model: request.model }, 'Using KieAI Veo provider');
-    const result = await this.kieaiProvider.generateVideo({
-      prompt: request.prompt,
-      model: request.model === 'veo3' ? 'veo3' : 'veo3_fast',
-      aspectRatio: request.aspectRatio || '16:9',
-      watermark: 'AI Pipeline',
-    });
-
-    return {
-      jobId: result.taskId,
-      providerJobId: result.taskId,
-      status: result.status,
-      videoUrl: result.videoUrl,
-      estimatedTime: result.estimatedTime,
-      costUsd: 0.15,
-    };
+    throw new Error('All providers failed or exhausted');
   }
 
   async getStatus(taskId: string): Promise<VideoGenerationResult> {
+    // Определяем провайдер по префиксу taskId
+    let provider = this.providers[0]; // Default to first provider
+
     if (taskId.startsWith('mock_')) {
-      const result = await this.mockProvider.getStatus(taskId);
-      return {
-        jobId: result.id,
-        providerJobId: result.id,
-        status: result.status,
-        videoUrl: result.videoUrl,
-        thumbnailUrl: result.thumbnailUrl,
-        duration: result.duration,
-        costUsd: result.costUsd,
-      };
+      provider = this.providers.find(p => p.name === 'Mock') || this.providers[0];
     }
 
-    if (!this.kieaiProvider) {
-      throw new Error('KieAI provider not available');
-    }
+    const result = await provider.instance.getStatus(taskId);
 
-    const result = await this.kieaiProvider.getStatus(taskId);
     return {
       jobId: result.taskId,
       providerJobId: result.taskId,
       status: result.status,
       videoUrl: result.videoUrl,
-      costUsd: 0.15,
+      costUsd: provider.tier === 'free' ? 0 : 0.15,
+      duration: 10,
+      provider: provider.name,
+      tier: provider.tier,
     };
   }
 }
