@@ -1,6 +1,6 @@
 import axios from 'axios';
 import pino from 'pino';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 const logger = pino({ level: 'info' });
 
@@ -64,7 +64,7 @@ export class RunwareProvider {
   }
 
   async generateVideo(options: GenerateVideoOptions): Promise<VideoResult> {
-    const taskUUID = uuidv4();
+    const taskUUID = randomUUID();
     const modelId  = this.resolveModel(options.model);
     const duration = options.duration || 5;
     const cost     = this.estimatedCost(modelId, duration);
