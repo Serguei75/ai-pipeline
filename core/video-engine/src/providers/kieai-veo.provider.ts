@@ -3,115 +3,133 @@ import pino from 'pino';
 
 const logger = pino({ level: 'info' });
 
-interface KieAIConfig {
+interface KieAIVeoConfig {
   apiKey: string;
   baseUrl?: string;
+  webhookUrl?: string;
 }
 
-export interface GenerateVideoOptions {
-  model?: 'veo-3' | 'runway-gen3';
-  duration?: 5 | 10 | 15;
-  aspectRatio?: '16:9' | '9:16' | '1:1';
-  resolution?: '720p' | '1080p' | '4k';
-  fps?: 24 | 30 | 60;
-  promptEnhance?: boolean;
+interface GenerateVideoOptions {
+  prompt: string;
+  model?: 'veo3' | 'veo3_fast';
+  aspectRatio?: '16:9' | '9:16' | 'Auto';
+  seeds?: number;
+  watermark?: string;
+  enableTranslation?: boolean;
+  imageUrls?: string[];
+  generationType?: 'TEXT_2_VIDEO' | 'FIRST_AND_LAST_FRAMES_2_VIDEO' | 'REFERENCE_2_VIDEO';
 }
 
-export interface VideoResult {
-  id: string;
+interface VideoGenerationResult {
+  taskId: string;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   videoUrl?: string;
-  thumbnailUrl?: string;
-  duration?: number;
-  costUsd?: number;
+  estimatedTime?: number;
+}
+
+interface StatusResponse {
+  code: number;
+  msg: string;
+  data: {
+    taskId: string;
+    successFlag: 0 | 1 | 2 | 3;
+    resultUrls?: string;
+    createTime?: string;
+  };
 }
 
 export class KieAIVeoProvider {
   private apiKey: string;
   private baseUrl: string;
-  
-  private readonly PRICING = {
-    'veo-3': { '5s': 0.10, '10s': 0.20, '15s': 0.30 },
-    'runway-gen3': { '5s': 0.05, '10s': 0.10, '15s': 0.15 },
-  };
+  private webhookUrl?: string;
 
-  constructor(config: KieAIConfig) {
+  constructor(config: KieAIVeoConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl || 'https://api.kie.ai';
+    this.webhookUrl = config.webhookUrl;
   }
 
-  async generateVideo(prompt: string, options: GenerateVideoOptions = {}): Promise<VideoResult> {
-    const model = options.model || 'veo-3';
-    const duration = options.duration || 10;
-    
-    logger.info({ prompt, model, duration }, 'Submitting video generation to Kie.ai');
+  async generateVideo(options: GenerateVideoOptions): Promise<VideoGenerationResult> {
+    const endpoint = `${this.baseUrl}/api/v1/veo/generate`;
+
+    const payload = {
+      prompt: options.prompt,
+      model: options.model || 'veo3_fast',
+      aspect_ratio: options.aspectRatio || '16:9',
+      enableTranslation: options.enableTranslation ?? true,
+      ...(options.seeds && { seeds: options.seeds }),
+      ...(options.watermark && { watermark: options.watermark }),
+      ...(this.webhookUrl && { callBackUrl: this.webhookUrl }),
+      ...(options.imageUrls && { imageUrls: options.imageUrls }),
+      ...(options.generationType && { generationType: options.generationType }),
+    };
+
+    logger.info({ endpoint, prompt: options.prompt.slice(0, 50) }, 'Sending Veo 3.1 generation request');
 
     try {
-      const endpoint = `${this.baseUrl}/v1/videos/generations`;
-      
-      const response = await axios.post(
-        endpoint,
-        {
-          model: model === 'veo-3' ? 'google/veo-3' : 'runwayml/gen3-alpha',
-          prompt,
-          prompt_enhance: options.promptEnhance ?? true,
-          aspect_ratio: options.aspectRatio || '16:9',
-          duration,
-          resolution: options.resolution || '1080p',
-          fps: options.fps || 30,
+      const response = await axios.post(endpoint, payload, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 300000,
-        }
-      );
-
-      const data = response.data;
-      const costKey = `${duration}s` as '5s' | '10s' | '15s';
-      const cost = this.PRICING[model][costKey];
-
-      return {
-        id: data.id,
-        status: data.status || 'queued',
-        videoUrl: data.output?.video_url,
-        thumbnailUrl: data.output?.thumbnail_url,
-        duration: data.output?.duration,
-        costUsd: cost,
-      };
-    } catch (error: any) {
-      logger.error({ error: error.message }, 'Kie.ai video generation failed');
-      throw new Error(`KieAI generation failed: ${error.message}`);
-    }
-  }
-
-  async getStatus(jobId: string): Promise<VideoResult> {
-    try {
-      const endpoint = `${this.baseUrl}/v1/videos/${jobId}`;
-      
-      const response = await axios.get(endpoint, {
-        headers: { 'Authorization': `Bearer ${this.apiKey}` },
         timeout: 30000,
       });
 
-      const data = response.data;
+      logger.info({ response: response.data }, 'Veo 3.1 generation response');
 
-      return {
-        id: data.id,
-        status: data.status,
-        videoUrl: data.output?.video_url,
-        thumbnailUrl: data.output?.thumbnail_url,
-        duration: data.output?.duration,
-      };
+      if (response.data.code === 200) {
+        return {
+          taskId: response.data.data.taskId,
+          status: 'queued',
+          estimatedTime: 120,
+        };
+      } else {
+        throw new Error(`Kie.ai API error: ${response.data.msg || 'Unknown error'}`);
+      }
     } catch (error: any) {
-      logger.error({ error: error.message, jobId }, 'Failed to get video status');
+      logger.error({ error: error.message, response: error.response?.data }, 'Veo generation failed');
+      throw new Error(`Video generation failed: ${error.response?.data?.msg || error.message}`);
+    }
+  }
+
+  async getStatus(taskId: string): Promise<VideoGenerationResult> {
+    const endpoint = `${this.baseUrl}/api/v1/veo/record-info?taskId=${taskId}`;
+
+    try {
+      const response = await axios.get(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+        timeout: 10000,
+      });
+
+      const data = response.data.data;
+
+      if (data.successFlag === 1) {
+        const videoUrls = JSON.parse(data.resultUrls || '[]');
+        return {
+          taskId: data.taskId,
+          status: 'completed',
+          videoUrl: videoUrls[0],
+        };
+      } else if (data.successFlag === 2 || data.successFlag === 3) {
+        return {
+          taskId: data.taskId,
+          status: 'failed',
+        };
+      } else {
+        return {
+          taskId: data.taskId,
+          status: 'processing',
+        };
+      }
+    } catch (error: any) {
+      logger.error({ error: error.message, taskId }, 'Status check failed');
       throw new Error(`Status check failed: ${error.message}`);
     }
   }
 
   getName(): string {
-    return 'KieAI-Veo';
+    return 'KieAI-Veo3';
   }
 }

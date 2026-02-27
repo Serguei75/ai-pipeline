@@ -1,8 +1,21 @@
-import { VideoResult } from './kieai-veo.provider.js';
 import { randomUUID } from 'crypto';
 
+interface VideoResult {
+  id: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  duration?: number;
+  costUsd?: number;
+}
+
+interface GenerateVideoOptions {
+  prompt: string;
+  duration?: number;
+}
+
 export class MockVideoProvider {
-  async generateVideo(prompt: string, options: any = {}): Promise<VideoResult> {
+  async generateVideo(options: GenerateVideoOptions): Promise<VideoResult> {
     const id = `mock_${randomUUID()}`;
     
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -17,13 +30,14 @@ export class MockVideoProvider {
     };
   }
 
-  async getStatus(jobId: string): Promise<VideoResult> {
+  async getStatus(taskId: string): Promise<VideoResult> {
     return {
-      id: jobId,
+      id: taskId,
       status: 'completed',
-      videoUrl: `https://storage.mock.ai/${jobId}.mp4`,
-      thumbnailUrl: `https://storage.mock.ai/${jobId}_thumb.jpg`,
+      videoUrl: `https://storage.mock.ai/${taskId}.mp4`,
+      thumbnailUrl: `https://storage.mock.ai/${taskId}_thumb.jpg`,
       duration: 10,
+      costUsd: 0,
     };
   }
 
