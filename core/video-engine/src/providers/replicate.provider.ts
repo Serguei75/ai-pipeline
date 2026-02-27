@@ -1,16 +1,29 @@
-import axios from 'axios';
+import Replicate from 'replicate';
 import pino from 'pino';
 
 const logger = pino({ level: 'info' });
 
 // 💰 Актуальные цены Replicate (февраль 2026)
-// Источник: https://replicate.com/pricing
+// Источник: https://replicate.com/explore
 export const REPLICATE_MODELS = {
-  'haiper-v2':      { id: 'haiper/haiper-video-2', version: 'latest', pricePerSec: 0.05,  label: 'Haiper v2 (cheapest!)' },
-  'kling-v1.6-pro': { id: 'kuaishou/kling-v1-6-pro', version: 'latest', pricePerSec: 0.098, label: 'Kling v1.6 Pro' },
-  'veo-2':          { id: 'google-deepmind/veo-2', version: 'latest', pricePerSec: 0.50,  label: 'Veo 2 (max quality)' },
-  'luma-dream':     { id: 'luma-ai/luma-dream-machine', version: 'latest', pricePerSec: 0.08, label: 'Luma Dream Machine' },
+  'haiper-v2': {
+    id: 'haiper/haiper-video-2',
+    pricePerSec: 0.05,
+    label: 'Haiper Video 2 (cheapest! $0.25/5sec)',
+  },
+  'kling-v1.6-pro': {
+    id: 'kuaishou/kling-v1-6-pro',
+    pricePerSec: 0.098,
+    label: 'Kling v1.6 Pro ($0.49/5sec)',
+  },
+  'veo-2': {
+    id: 'google-deepmind/veo-2',
+    pricePerSec: 0.50,
+    label: 'Veo 2 (max quality, $2.50/5sec)',
+  },
 };
+
+export type ReplicateModelKey = keyof typeof REPLICATE_MODELS;
 
 interface ReplicateConfig {
   apiToken: string;
@@ -18,6 +31,7 @@ interface ReplicateConfig {
 
 interface GenerateVideoOptions {
   prompt: string;
+  /** Short key like 'haiper-v2' OR full model path 'haiper/haiper-video-2' */
   model?: string;
   duration?: number;
   aspectRatio?: '16:9' | '9:16';
@@ -27,74 +41,78 @@ interface VideoResult {
   taskId: string;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   videoUrl?: string;
-  cost?: number;
   estimatedTime?: number;
+  cost?: number;
+  modelUsed?: string;
 }
 
 export class ReplicateProvider {
-  private apiToken: string;
-  private baseUrl = 'https://api.replicate.com/v1';
+  private client: Replicate;
 
   constructor(config: ReplicateConfig) {
-    this.apiToken = config.apiToken;
+    this.client = new Replicate({ auth: config.apiToken });
   }
 
-  private resolveModel(model?: string): { id: string; version: string; pricePerSec: number } {
-    const entry = REPLICATE_MODELS[model as keyof typeof REPLICATE_MODELS];
-    return entry || REPLICATE_MODELS['haiper-v2'];
+  /**
+   * Resolve short key OR full model path.
+   * Examples:
+   *  'haiper-v2' → 'haiper/haiper-video-2'
+   *  'haiper/haiper-video-2' → 'haiper/haiper-video-2'
+   */
+  private resolveModel(model?: string): string {
+    if (!model) return REPLICATE_MODELS['haiper-v2'].id;
+    const entry = REPLICATE_MODELS[model as ReplicateModelKey];
+    if (entry) return entry.id;
+    if (model.includes('/')) return model; // already full path
+    logger.warn({ model }, 'Unknown Replicate model, using haiper-v2');
+    return REPLICATE_MODELS['haiper-v2'].id;
+  }
+
+  private estimatedCost(modelId: string, duration: number): number {
+    const entry = Object.values(REPLICATE_MODELS).find(m => m.id === modelId);
+    return entry ? +(entry.pricePerSec * duration).toFixed(4) : 0;
   }
 
   async generateVideo(options: GenerateVideoOptions): Promise<VideoResult> {
-    const modelInfo = this.resolveModel(options.model);
+    const modelId = this.resolveModel(options.model);
     const duration = options.duration || 5;
-    const estimatedCost = duration * modelInfo.pricePerSec;
+    const cost = this.estimatedCost(modelId, duration);
 
     logger.info(
-      { model: modelInfo.id, duration, estimatedCost: `$${estimatedCost.toFixed(2)}` },
-      'Replicate: starting video generation (pay-as-you-go, no minimum)'
+      { model: modelId, duration, estimatedCost: `$${cost}` },
+      '🎬 Replicate: starting video generation (pay-as-you-go, $0 minimum)'
     );
 
     try {
-      // Replicate Predictions API с model slug
-      const response = await axios.post(
-        `${this.baseUrl}/predictions`,
-        {
-          model: modelInfo.id,
-          input: {
-            prompt: options.prompt,
-            duration_in_seconds: duration,
-            aspect_ratio: options.aspectRatio || '16:9',
-          },
+      const prediction = await this.client.predictions.create({
+        model: modelId,
+        input: {
+          prompt: options.prompt,
+          duration,
+          aspect_ratio: options.aspectRatio || '16:9',
         },
-        {
-          headers: {
-            'Authorization': `Token ${this.apiToken}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'wait',
-          },
-          timeout: 30000,
-        }
-      );
-
-      const prediction = response.data;
+      });
 
       logger.info({ predictionId: prediction.id, status: prediction.status }, 'Replicate prediction created');
 
       return {
         taskId: prediction.id,
-        status: prediction.status === 'succeeded' ? 'completed' : prediction.status === 'failed' ? 'failed' : 'processing',
-        videoUrl: prediction.output?.[0] || prediction.output,
-        cost: estimatedCost,
+        status: prediction.status === 'succeeded' ? 'completed' : 'queued',
+        videoUrl: prediction.output ? (Array.isArray(prediction.output) ? prediction.output[0] : prediction.output as string) : undefined,
         estimatedTime: 90,
+        cost,
+        modelUsed: modelId,
       };
     } catch (error: any) {
       logger.error(
-        { error: error.message, response: error.response?.data },
+        { error: error.message, model: modelId },
         'Replicate generation failed'
       );
 
-      if (error.response?.status === 402 || error.response?.data?.detail?.includes('payment')) {
-        throw new Error('REPLICATE_PAYMENT_REQUIRED');
+      // Check if error is related to credits/billing
+      const errMsg = error.message?.toLowerCase() || '';
+      if (errMsg.includes('credit') || errMsg.includes('billing') || errMsg.includes('payment')) {
+        throw new Error('REPLICATE_LIMIT_EXCEEDED');
       }
       throw error;
     }
@@ -102,30 +120,30 @@ export class ReplicateProvider {
 
   async getStatus(taskId: string): Promise<VideoResult> {
     try {
-      const response = await axios.get(
-        `${this.baseUrl}/predictions/${taskId}`,
-        {
-          headers: {
-            'Authorization': `Token ${this.apiToken}`,
-          },
-          timeout: 10000,
-        }
-      );
+      const prediction = await this.client.predictions.get(taskId);
 
-      const prediction = response.data;
+      logger.info({ taskId, status: prediction.status }, 'Replicate status check');
 
       if (prediction.status === 'succeeded') {
+        const videoUrl = Array.isArray(prediction.output)
+          ? prediction.output[0]
+          : (prediction.output as string);
+
+        logger.info({ taskId, videoUrl }, '✅ Replicate video completed!');
+
         return {
           taskId,
           status: 'completed',
-          videoUrl: prediction.output?.[0] || prediction.output,
+          videoUrl,
         };
       }
 
-      if (prediction.status === 'failed') {
-        return { taskId, status: 'failed', cost: 0 };
+      if (prediction.status === 'failed' || prediction.status === 'canceled') {
+        logger.error({ taskId, error: prediction.error }, 'Replicate task failed');
+        return { taskId, status: 'failed' };
       }
 
+      // starting, processing
       return { taskId, status: 'processing' };
     } catch (error: any) {
       logger.error({ taskId, error: error.message }, 'Replicate status check failed');
