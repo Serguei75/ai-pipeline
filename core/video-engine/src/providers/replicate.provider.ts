@@ -55,11 +55,11 @@ export class ReplicateProvider {
     );
 
     try {
-      // Replicate Predictions API
+      // Replicate Predictions API с model slug
       const response = await axios.post(
         `${this.baseUrl}/predictions`,
         {
-          version: modelInfo.id,
+          model: modelInfo.id,
           input: {
             prompt: options.prompt,
             duration_in_seconds: duration,
@@ -70,7 +70,7 @@ export class ReplicateProvider {
           headers: {
             'Authorization': `Token ${this.apiToken}`,
             'Content-Type': 'application/json',
-            'Prefer': 'wait', // Wait for prediction to start
+            'Prefer': 'wait',
           },
           timeout: 30000,
         }
