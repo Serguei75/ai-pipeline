@@ -1,7 +1,7 @@
-import { AIMLAPIProvider } from './aimlapi.provider.js';
-import { FalAIProvider } from './fal.provider.js';
-import { KieAIVeoProvider } from './kieai-veo.provider.js';
-import { MockVideoProvider } from './mock.provider.js';
+import { AIMLAPIProvider } from '../providers/aimlapi.provider.js';
+import { FalAIProvider } from '../providers/fal.provider.js';
+import { KieAIVeoProvider } from '../providers/kieai-veo.provider.js';
+import { MockVideoProvider } from '../providers/mock.provider.js';
 import pino from 'pino';
 
 const logger = pino({ level: 'info' });
