@@ -1,5 +1,6 @@
 import { AIMLAPIProvider } from '../providers/aimlapi.provider.js';
 import { FalAIProvider } from '../providers/fal.provider.js';
+import { RunwareProvider } from '../providers/runware.provider.js';
 import { KieAIVeoProvider } from '../providers/kieai-veo.provider.js';
 import { MockVideoProvider } from '../providers/mock.provider.js';
 import pino from 'pino';
@@ -36,7 +37,20 @@ export class VideoService {
   }> = [];
 
   constructor() {
-    // Priority 1: AIMLAPI (FREE 10 min/месяц)
+    // Priority 1: Runware ($10 FREE без карты)
+    if (process.env.RUNWARE_API_KEY) {
+      this.providers.push({
+        name: 'Runware',
+        instance: new RunwareProvider({ apiKey: process.env.RUNWARE_API_KEY }),
+        enabled: true,
+        tier: 'free',
+      });
+      logger.info('✅ Runware provider loaded ($10 FREE credits, no card required)');
+    } else {
+      logger.warn('⚠️ RUNWARE_API_KEY not set, skipping FREE tier');
+    }
+
+    // Priority 2: AIMLAPI (50k кредитов с верификацией картой)
     if (process.env.AIMLAPI_API_KEY) {
       this.providers.push({
         name: 'AIMLAPI',
@@ -44,12 +58,12 @@ export class VideoService {
         enabled: true,
         tier: 'free',
       });
-      logger.info('✅ AIMLAPI provider loaded (FREE 10 min/month)');
+      logger.info('✅ AIMLAPI provider loaded (50k FREE credits)');
     } else {
       logger.warn('⚠️ AIMLAPI_API_KEY not set, skipping FREE tier');
     }
 
-    // Priority 2: Fal.ai (FREE $10-20 credits)
+    // Priority 3: Fal.ai (FREE $10-20 credits — может быть недоступно)
     if (process.env.FALAI_API_KEY) {
       this.providers.push({
         name: 'FalAI',
@@ -57,12 +71,12 @@ export class VideoService {
         enabled: true,
         tier: 'free',
       });
-      logger.info('✅ Fal.ai provider loaded (FREE $10-20 credits)');
+      logger.info('✅ Fal.ai provider loaded (FREE credits if available)');
     } else {
-      logger.warn('⚠️ FALAI_API_KEY not set, skipping FREE tier');
+      logger.info('ℹ️ FALAI_API_KEY not set (Fal.ai removed free credits in Dec 2025)');
     }
 
-    // Priority 3: Kie.ai (PAID)
+    // Priority 4: Kie.ai (PAID)
     if (process.env.KIEAI_API_KEY) {
       this.providers.push({
         name: 'KieAI',
@@ -74,7 +88,7 @@ export class VideoService {
         enabled: true,
         tier: 'paid',
       });
-      logger.info('✅ Kie.ai provider loaded (PAID)');
+      logger.info('✅ Kie.ai provider loaded (PAID, requires balance)');
     } else {
       logger.warn('⚠️ KIEAI_API_KEY not set, skipping PAID tier');
     }
