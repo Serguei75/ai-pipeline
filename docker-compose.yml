@@ -503,8 +503,11 @@ services:
       TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID}
       API_GATEWAY_URL: http://api-gateway:3100
       THUMBNAIL_ENGINE_URL: http://thumbnail-engine:3009
+      VIDEO_ENGINE_URL: http://video-engine:3011
+      KIEAI_API_KEY: ${KIEAI_API_KEY:-}
       REDIS_URL: redis://redis:6379
     depends_on:
       api-gateway: { condition: service_healthy }
       redis:       { condition: service_healthy }
       thumbnail-engine: { condition: service_healthy }
+      video-engine: { condition: service_healthy }

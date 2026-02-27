@@ -4,6 +4,7 @@ import { handleTopics }      from './handlers/topics';
 import { handleScripts }     from './handlers/scripts';
 import { handleStats }       from './handlers/stats';
 import { handleThumbnails, startThumbnailPolling }  from './handlers/thumbnails';
+import { handleVideo }       from './handlers/video.handler';
 import { handleCosts }       from './handlers/costs';
 import { handleCompetitors } from './handlers/competitors';
 import { EventConsumer }     from './services/events';
@@ -35,7 +36,7 @@ bot.command('start', async (ctx) => {
     .text('📝 Скрипты',    'menu:scripts')
     .row()
     .text('🎨 Обложки',   'menu:thumbnails')
-    .text('🖼 Создать',   'menu:generate')
+    .text('🎬 Видео',     'menu:video')
     .row()
     .text('🔍 Конкуренты', 'menu:competitors')
     .text('💡 Идеи',       'menu:ideas')
@@ -48,6 +49,7 @@ bot.command('start', async (ctx) => {
     `📌 /topics — темы на одобрение\n` +
     `📝 /scripts — скрипты на одобрение\n` +
     `🎨 /thumbnails — последние обложки\n` +
+    `🎬 /video — создать видео (Veo 3)\n` +
     `🖼 /generate — создать обложку (Kie.ai)\n` +
     `🔬 /ab\_tests — A/B тесты обложек\n` +
     `💰 /costs — расходы API\n` +
@@ -58,6 +60,9 @@ bot.command('start', async (ctx) => {
     { parse_mode: 'Markdown', reply_markup: keyboard }
   );
 });
+
+// ── /video — генерация видео ───────────────────────────────────────────
+bot.command('video', handleVideo.handleVideoCommand);
 
 // ── /generate — создать thumbnail ─────────────────────────────────────
 bot.command('generate', handleThumbnails.generate);
@@ -113,6 +118,7 @@ bot.callbackQuery('menu:topics',      async (ctx) => { await ctx.answerCallbackQ
 bot.callbackQuery('menu:scripts',     async (ctx) => { await ctx.answerCallbackQuery(); await handleScripts.list(ctx); });
 bot.callbackQuery('menu:stats',       async (ctx) => { await ctx.answerCallbackQuery(); await handleStats.show(ctx); });
 bot.callbackQuery('menu:thumbnails',  async (ctx) => { await ctx.answerCallbackQuery(); await handleThumbnails.list(ctx); });
+bot.callbackQuery('menu:video',       async (ctx) => { await ctx.answerCallbackQuery(); await handleVideo.handleVideoCommand(ctx); });
 bot.callbackQuery('menu:generate',    async (ctx) => { await ctx.answerCallbackQuery(); await handleThumbnails.generate(ctx); });
 bot.callbackQuery('menu:costs',       async (ctx) => { await ctx.answerCallbackQuery(); await handleCosts.show(ctx); });
 bot.callbackQuery('menu:competitors', async (ctx) => { await ctx.answerCallbackQuery(); await handleCompetitors.list(ctx); });

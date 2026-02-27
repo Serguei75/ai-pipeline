@@ -1,3 +1,9 @@
+# Environment files (SECURITY - never commit!)
+.env
+.env.*
+!.env.example
+*.env
+
 # Temporary files
 =
 *.deb
@@ -6,3 +12,34 @@
 naming
 resolving
 unpacking
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Docker
+docker-compose.yml.backup
+docker-compose.yml.broken*
+
+# Database
+*.db
+*.sqlite
