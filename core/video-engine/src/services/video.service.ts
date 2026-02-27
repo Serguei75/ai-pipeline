@@ -1,6 +1,7 @@
 import { AIMLAPIProvider } from '../providers/aimlapi.provider.js';
 import { FalAIProvider } from '../providers/fal.provider.js';
 import { RunwareProvider } from '../providers/runware.provider.js';
+import { ReplicateProvider } from '../providers/replicate.provider.js';
 import { KieAIVeoProvider } from '../providers/kieai-veo.provider.js';
 import { MockVideoProvider } from '../providers/mock.provider.js';
 import pino from 'pino';
@@ -37,7 +38,20 @@ export class VideoService {
   }> = [];
 
   constructor() {
-    // Priority 1: Runware ($10 FREE без карты)
+    // Priority 1: Replicate ($0 minimum, pay-as-you-go) — BEST FOR TESTING!
+    if (process.env.REPLICATE_API_TOKEN) {
+      this.providers.push({
+        name: 'Replicate',
+        instance: new ReplicateProvider({ apiToken: process.env.REPLICATE_API_TOKEN }),
+        enabled: true,
+        tier: 'paid',
+      });
+      logger.info('✅ Replicate provider loaded (pay-as-you-go, $0 minimum, Haiper v2 = $0.25/5sec)');
+    } else {
+      logger.info('ℹ️ REPLICATE_API_TOKEN not set (recommended: $0 minimum, pay-as-you-go)');
+    }
+
+    // Priority 2: Runware ($10 FREE, но требует $5+ пополнения для video inference)
     if (process.env.RUNWARE_API_KEY) {
       this.providers.push({
         name: 'Runware',
@@ -45,12 +59,12 @@ export class VideoService {
         enabled: true,
         tier: 'free',
       });
-      logger.info('✅ Runware provider loaded ($10 FREE credits, no card required)');
+      logger.info('✅ Runware provider loaded ($10 FREE credits, requires $5+ top-up for video)');
     } else {
-      logger.warn('⚠️ RUNWARE_API_KEY not set, skipping FREE tier');
+      logger.info('ℹ️ RUNWARE_API_KEY not set (free $10 credits, but requires $5+ top-up)');
     }
 
-    // Priority 2: AIMLAPI (50k кредитов с верификацией картой)
+    // Priority 3: AIMLAPI (50k кредитов с верификацией картой)
     if (process.env.AIMLAPI_API_KEY) {
       this.providers.push({
         name: 'AIMLAPI',
@@ -60,10 +74,10 @@ export class VideoService {
       });
       logger.info('✅ AIMLAPI provider loaded (50k FREE credits)');
     } else {
-      logger.warn('⚠️ AIMLAPI_API_KEY not set, skipping FREE tier');
+      logger.info('ℹ️ AIMLAPI_API_KEY not set (50k free credits with card verification)');
     }
 
-    // Priority 3: Fal.ai (FREE $10-20 credits — может быть недоступно)
+    // Priority 4: Fal.ai (FREE $10-20 credits — может быть недоступно)
     if (process.env.FALAI_API_KEY) {
       this.providers.push({
         name: 'FalAI',
@@ -76,7 +90,7 @@ export class VideoService {
       logger.info('ℹ️ FALAI_API_KEY not set (Fal.ai removed free credits in Dec 2025)');
     }
 
-    // Priority 4: Kie.ai (PAID)
+    // Priority 5: Kie.ai (PAID)
     if (process.env.KIEAI_API_KEY) {
       this.providers.push({
         name: 'KieAI',
@@ -90,7 +104,7 @@ export class VideoService {
       });
       logger.info('✅ Kie.ai provider loaded (PAID, requires balance)');
     } else {
-      logger.warn('⚠️ KIEAI_API_KEY not set, skipping PAID tier');
+      logger.info('ℹ️ KIEAI_API_KEY not set (requires balance top-up)');
     }
 
     // Fallback: Mock (всегда доступен)
