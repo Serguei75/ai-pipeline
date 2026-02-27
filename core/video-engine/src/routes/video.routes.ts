@@ -12,8 +12,6 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         model: body.model,
         duration: body.duration,
         aspectRatio: body.aspectRatio,
-        resolution: body.resolution,
-        fps: body.fps,
         userId: body.userId,
       });
       return reply.code(201).send(result);
